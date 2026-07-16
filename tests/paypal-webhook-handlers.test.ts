@@ -73,7 +73,7 @@ function createSupabaseStub(seed?: {
     const state: {
       op?: "select" | "update"
       patch?: Record<string, unknown>
-      filters: Array<{ column: string; value: unknown; op: "eq" | "ilike" | "is" }>
+      filters: Array<{ column: string; value: unknown; op: "eq" | "ilike" | "is" | "in" }>
     } = { filters: [] }
 
     function applyFilters(rows: Record<string, unknown>[]) {
@@ -85,6 +85,9 @@ function createSupabaseStub(seed?: {
             )
           }
           if (filter.op === "is") return row[filter.column] === filter.value
+          if (filter.op === "in") {
+            return Array.isArray(filter.value) && filter.value.includes(row[filter.column])
+          }
           return row[filter.column] === filter.value
         }),
       )
@@ -114,6 +117,10 @@ function createSupabaseStub(seed?: {
       },
       ilike(column: string, value: unknown) {
         state.filters.push({ column, value, op: "ilike" })
+        return builder
+      },
+      in(column: string, value: unknown[]) {
+        state.filters.push({ column, value, op: "in" })
         return builder
       },
       maybeSingle: async () => {
@@ -429,7 +436,7 @@ test("BILLING.SUBSCRIPTION.CANCELLED keeps future paid-through access", async ()
 })
 
 test("BILLING.SUBSCRIPTION.CANCELLED acknowledges duplicate subscriptions without local rows", async () => {
-  const { supabase, billing } = createSupabaseStub({
+  const { supabase, billing, paypalIntents } = createSupabaseStub({
     billing: [],
     paypalIntents: [
       {
@@ -438,7 +445,7 @@ test("BILLING.SUBSCRIPTION.CANCELLED acknowledges duplicate subscriptions withou
         interval: "month",
         source: "pricing_page",
         status: "duplicate",
-        provider_subscription_id: "I-active",
+        provider_subscription_id: null,
         expires_at: futureIso(),
       },
     ],
@@ -456,6 +463,7 @@ test("BILLING.SUBSCRIPTION.CANCELLED acknowledges duplicate subscriptions withou
 
   assert.deepEqual(result, { handled: true })
   assert.equal(billing.length, 0)
+  assert.equal(paypalIntents[0].provider_subscription_id, "I-active")
 })
 
 test("activation webhook does not rebind an intent that already belongs to another PayPal subscription", async () => {
@@ -529,6 +537,44 @@ test("activation webhook cancels subscriptions created from expired checkout int
   assert.deepEqual(cancelled, ["I-active"])
   assert.equal(paypalIntents[0].status, "expired")
   assert.equal(paypalIntents[0].provider_subscription_id, null)
+  assert.equal(billing.length, 0)
+})
+
+test("activation webhook cancels subscriptions created from quarantined duplicate intents", async () => {
+  const { supabase, billing, paypalIntents } = createSupabaseStub({
+    billing: [],
+    paypalIntents: [
+      {
+        id: "intent-duplicate",
+        token: "token-active",
+        interval: "month",
+        source: "pricing_page",
+        status: "duplicate",
+        duplicate_reason: "reactivation_reservation_race",
+        provider_subscription_id: null,
+        expires_at: futureIso(),
+      },
+    ],
+  })
+  const cancelled: string[] = []
+
+  const result = await handlePayPalWebhookEvent(
+    event("WH-duplicate-token", "BILLING.SUBSCRIPTION.ACTIVATED"),
+    {
+      supabase,
+      premiumTierId: "tier-premium",
+      freeTierId: "tier-free",
+      retrievePayPalSubscription: async () => subscription("ACTIVE", futureIso()),
+      cancelPayPalSubscription: async (subscriptionId) => {
+        cancelled.push(subscriptionId)
+      },
+    },
+  )
+
+  assert.deepEqual(result, { handled: true })
+  assert.deepEqual(cancelled, ["I-active"])
+  assert.equal(paypalIntents[0].status, "duplicate")
+  assert.equal(paypalIntents[0].provider_subscription_id, "I-active")
   assert.equal(billing.length, 0)
 })
 

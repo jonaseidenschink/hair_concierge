@@ -19,6 +19,7 @@ export interface PayPalCheckoutIntentRow {
   lead_id: string | null
   email: string | null
   user_id: string | null
+  reactivation_reservation_id: string | null
   provider_subscription_id: string | null
   status: PayPalCheckoutIntentStatus
   duplicate_reason: string | null
@@ -36,6 +37,10 @@ export interface CreatePayPalCheckoutIntentInput {
   userId?: string | null
   expiresAt?: Date
   metadata?: Record<string, unknown>
+}
+
+export interface CreatePayPalReactivationCheckoutIntentInput extends CreatePayPalCheckoutIntentInput {
+  reactivationReservationId: string
 }
 
 export type PayPalCheckoutIntentClient = Pick<SupabaseClient, "from">
@@ -83,6 +88,41 @@ export async function createPayPalCheckoutIntent(
   return data as PayPalCheckoutIntentRow
 }
 
+export async function createOrAdoptPayPalReactivationCheckoutIntent(
+  supabase: PayPalCheckoutIntentClient,
+  input: CreatePayPalReactivationCheckoutIntentInput,
+): Promise<PayPalCheckoutIntentRow> {
+  const { data, error } = await supabase
+    .from("paypal_checkout_intents")
+    .insert({
+      token: createPayPalCheckoutIntentToken(),
+      interval: input.interval,
+      source: input.source,
+      lead_id: input.leadId ?? null,
+      email: input.email?.toLowerCase() ?? null,
+      user_id: input.userId ?? null,
+      reactivation_reservation_id: input.reactivationReservationId,
+      expires_at: (input.expiresAt ?? defaultPayPalCheckoutIntentExpiresAt()).toISOString(),
+      metadata: {
+        ...(input.metadata ?? {}),
+        reactivation_reservation_id: input.reactivationReservationId,
+      },
+    })
+    .select("*")
+    .single()
+
+  if (!error) return data as PayPalCheckoutIntentRow
+  if (!isUniqueViolation(error)) throw error
+
+  const canonicalIntent = await findPayPalCheckoutIntentByReactivationReservationId(
+    supabase,
+    input.reactivationReservationId,
+  )
+  if (canonicalIntent) return canonicalIntent
+
+  throw error
+}
+
 export async function findPayPalCheckoutIntentByToken(
   supabase: PayPalCheckoutIntentClient,
   token: string,
@@ -111,6 +151,20 @@ export async function findPayPalCheckoutIntentByProviderSubscriptionId(
   return (data as PayPalCheckoutIntentRow | null) ?? null
 }
 
+export async function findPayPalCheckoutIntentByReactivationReservationId(
+  supabase: PayPalCheckoutIntentClient,
+  reservationId: string,
+): Promise<PayPalCheckoutIntentRow | null> {
+  const { data, error } = await supabase
+    .from("paypal_checkout_intents")
+    .select("*")
+    .eq("reactivation_reservation_id", reservationId)
+    .maybeSingle()
+
+  if (error) throw error
+  return (data as PayPalCheckoutIntentRow | null) ?? null
+}
+
 export async function bindPayPalCheckoutIntentToSubscription(
   supabase: PayPalCheckoutIntentClient,
   token: string,
@@ -127,6 +181,7 @@ export async function bindPayPalCheckoutIntentToSubscription(
     })
     .eq("token", token)
     .is("provider_subscription_id", null)
+    .in("status", ["created", "approved"])
     .select("*")
     .maybeSingle()
 
@@ -146,12 +201,14 @@ export async function markPayPalCheckoutIntentDuplicate(
   supabase: PayPalCheckoutIntentClient,
   token: string,
   reason: string,
+  providerSubscriptionId?: string,
 ): Promise<void> {
   const { error } = await supabase
     .from("paypal_checkout_intents")
     .update({
       status: "duplicate",
       duplicate_reason: reason,
+      ...(providerSubscriptionId ? { provider_subscription_id: providerSubscriptionId } : {}),
       updated_at: new Date().toISOString(),
     })
     .eq("token", token)
@@ -195,4 +252,10 @@ export function isPayPalCheckoutIntentExpired(
 ): boolean {
   const expiresAt = Date.parse(intent.expires_at)
   return !Number.isFinite(expiresAt) || expiresAt <= now.getTime()
+}
+
+function isUniqueViolation(error: unknown): boolean {
+  return Boolean(
+    error && typeof error === "object" && (error as { code?: unknown }).code === "23505",
+  )
 }

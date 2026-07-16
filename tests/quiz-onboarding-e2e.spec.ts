@@ -249,14 +249,14 @@ test.describe.serial("Quiz to onboarding E2E", () => {
         )
         .toBe("captured")
 
+      const latestLead = await fetchLatestLead()
+      expect(latestLead?.id).toBeTruthy()
       await page.getByRole("button", { name: /MEIN HAARPROFIL ANSEHEN/i }).click()
-      await expect(page.getByText(/Analyse fertig/i)).toBeVisible({ timeout: 15_000 })
-      await expect(
-        page.getByRole("heading", {
-          name: /So können sich deine Haare in 4 Wochen anfühlen/i,
-        }),
-      ).toBeVisible()
-      await expect(page.getByText(/Was dein Haar jetzt braucht/i)).toBeVisible()
+      await page.waitForURL((url) => url.pathname === `/result/${latestLead!.id}`, {
+        timeout: 15_000,
+      })
+      await expect(page.getByRole("heading", { name: /So begleitet dich Chaarlie/i })).toBeVisible()
+      await expect(page.getByText(/Warum Chaarlie ein Abo ist/i)).toHaveCount(0)
       await expect(
         page.getByRole("button", { name: /Jetzt starten.*34,99.*Quartal/i }),
       ).toBeVisible()
@@ -549,14 +549,14 @@ test.describe.serial("Quiz to onboarding E2E", () => {
       await expect(page.getByRole("button", { name: /MEIN HAARPROFIL ANSEHEN/i })).toBeVisible({
         timeout: 45_000,
       })
+      const latestLead = await fetchLatestLead()
+      expect(latestLead?.id).toBeTruthy()
       await page.getByRole("button", { name: /MEIN HAARPROFIL ANSEHEN/i }).click()
-      await expect(page.getByText(/Analyse fertig/i)).toBeVisible({ timeout: 15_000 })
-      await expect(
-        page.getByRole("heading", {
-          name: /So können sich deine Haare in 4 Wochen anfühlen/i,
-        }),
-      ).toBeVisible()
-      await expect(page.getByText(/Was dein Haar jetzt braucht/i)).toBeVisible()
+      await page.waitForURL((url) => url.pathname === `/result/${latestLead!.id}`, {
+        timeout: 15_000,
+      })
+      await expect(page.getByRole("heading", { name: /So begleitet dich Chaarlie/i })).toBeVisible()
+      await expect(page.getByText(/Warum Chaarlie ein Abo ist/i)).toHaveCount(0)
       await expect(
         page.getByRole("button", { name: /Jetzt starten.*34,99.*Quartal/i }),
       ).toBeVisible()

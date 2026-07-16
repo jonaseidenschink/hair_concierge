@@ -17,10 +17,12 @@ export type PayPalSubscription = {
   billing_info?: {
     next_billing_time?: string
   }
+  links?: Array<{ href?: string; rel?: string; method?: string }>
 }
 
 export type PayPalPlan = {
   id?: string
+  product_id?: string
   status?: string
   payment_preferences?: {
     setup_fee?: {
@@ -46,6 +48,16 @@ export type PayPalPlan = {
       }
     }
   }>
+}
+
+export class PayPalPlanPairValidationError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+  ) {
+    super(message)
+    this.name = "PayPalPlanPairValidationError"
+  }
 }
 
 export function mapPayPalSubscriptionStatus(status: string): BillingEntitlementStatus {
@@ -108,6 +120,38 @@ export function validatePayPalPlanShape(plan: PayPalPlan, interval: BillingInter
   validateOngoingPlan(plan, regularCycle)
   validateNoSetupFee(plan)
   validateNoTaxes(plan)
+}
+
+export function validatePayPalPlanPair(input: {
+  currentPlan: PayPalPlan
+  targetPlan: PayPalPlan
+  currentInterval: BillingInterval
+  targetInterval: BillingInterval
+  expectedProductId?: string | null
+}) {
+  try {
+    validatePayPalPlanShape(input.currentPlan, input.currentInterval)
+    validatePayPalPlanShape(input.targetPlan, input.targetInterval)
+  } catch (error) {
+    throw new PayPalPlanPairValidationError(
+      "paypal_plan_shape_mismatch",
+      error instanceof Error ? error.message : String(error),
+    )
+  }
+  const currentProduct = input.currentPlan.product_id
+  const targetProduct = input.targetPlan.product_id
+  if (!currentProduct || currentProduct !== targetProduct) {
+    throw new PayPalPlanPairValidationError(
+      "paypal_product_mismatch",
+      "Current and target PayPal plans are not part of the same product",
+    )
+  }
+  if (input.expectedProductId && currentProduct !== input.expectedProductId) {
+    throw new PayPalPlanPairValidationError(
+      "paypal_product_unexpected",
+      "PayPal plan does not belong to the configured subscription product",
+    )
+  }
 }
 
 function findRegularBillingCycle(

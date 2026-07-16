@@ -8,7 +8,11 @@ export default function DefaultOfferVariant({
   narrative,
   quizAnswers,
   pricingSlot,
+  entryContext,
   focusRoutine = false,
+  leadId,
+  offerTracking,
+  offerVariant,
 }: FunnelOfferVariantProps) {
   return (
     <QuizResultOfferPageShell
@@ -16,7 +20,11 @@ export default function DefaultOfferVariant({
       narrative={narrative}
       quizAnswers={quizAnswers}
       pricingSlot={pricingSlot}
+      entryContext={entryContext}
       focusRoutine={focusRoutine}
+      leadId={leadId}
+      offerTracking={offerTracking}
+      offerVariant={offerVariant}
     />
   )
 }

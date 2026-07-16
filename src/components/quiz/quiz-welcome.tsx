@@ -6,17 +6,15 @@ import { useQuizStore } from "@/lib/quiz/store"
 
 /**
  * Final quiz step (14 "auth_transition"). In the new paid-funnel model,
- * user accounts are created exclusively by the Stripe webhook — not by
- * self-service signup mid-quiz. This step therefore forwards the user
- * to /pricing with their leadId so their quiz email pre-fills the
- * Stripe Checkout Session.
+ * user accounts are created exclusively after checkout. This legacy step
+ * forwards a completed lead to the personalized result offer.
  */
 export function QuizWelcome() {
   const router = useRouter()
   const leadId = useQuizStore((s) => s.leadId)
 
   useEffect(() => {
-    const target = leadId ? `/pricing?lead=${leadId}` : "/pricing"
+    const target = leadId ? `/result/${encodeURIComponent(leadId)}?focus=unlock-plan` : "/quiz"
     router.replace(target)
   }, [leadId, router])
 

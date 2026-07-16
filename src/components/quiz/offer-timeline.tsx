@@ -18,7 +18,7 @@ const STEPS = [
 
 export function OfferTimeline() {
   return (
-    <section className="border-t border-border py-9">
+    <section data-offer-section="subscription_explanation" className="border-t border-border py-9">
       <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.13em] text-[var(--brand-plum)]">
         Ab jetzt an deiner Seite
       </p>

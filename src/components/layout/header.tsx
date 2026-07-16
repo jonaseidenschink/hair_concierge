@@ -1,7 +1,15 @@
 "use client"
 
 import { useAuth } from "@/providers/auth-provider"
-import { CircleUserRound, ListChecks, LogOut, MessageCircle, Shield, User } from "lucide-react"
+import {
+  CalendarCheck,
+  CircleUserRound,
+  ListChecks,
+  LogOut,
+  MessageCircle,
+  Shield,
+  User,
+} from "lucide-react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useState } from "react"
@@ -39,6 +47,10 @@ export function Header() {
           <NavLink href="/routine" current={pathname}>
             <ListChecks className="mr-1.5 h-4 w-4" />
             Routine
+          </NavLink>
+          <NavLink href="/tracker" current={pathname}>
+            <CalendarCheck className="mr-1.5 h-4 w-4" />
+            Tagebuch
           </NavLink>
           <NavLink href="/profile" current={pathname}>
             <User className="mr-1.5 h-4 w-4" />
@@ -80,6 +92,10 @@ export function Header() {
             <NavLink href="/routine" current={pathname} onClick={() => setMenuOpen(false)} mobile>
               <ListChecks className="mr-1.5 h-4 w-4" />
               Routine
+            </NavLink>
+            <NavLink href="/tracker" current={pathname} onClick={() => setMenuOpen(false)} mobile>
+              <CalendarCheck className="mr-1.5 h-4 w-4" />
+              Tagebuch
             </NavLink>
             <NavLink href="/profile" current={pathname} onClick={() => setMenuOpen(false)} mobile>
               <User className="mr-1.5 h-4 w-4" />

@@ -1,48 +1,43 @@
 import { redirect } from "next/navigation"
 
+import { hasCurrentAppAccess } from "@/lib/billing/subscriptions"
+import { sanitizeReactivationReturnDestination } from "@/lib/reactivation/return-destination"
 import { createClient } from "@/lib/supabase/server"
-
-import { PricingCards } from "./pricing-cards"
 
 export default async function PricingPage({
   searchParams,
 }: {
-  searchParams: Promise<{ lead?: string; reason?: string; interval?: string }>
+  searchParams: Promise<{ lead?: string; interval?: string; next?: string }>
 }) {
   const sp = await searchParams
-  const leadId = sp.lead ?? null
+  const leadId = sp.lead?.trim()
 
-  // Pricing requires an identity to check out with. Anonymous visitors with no
-  // lead (direct URL, stale /offer links) can't complete checkout — send them
-  // into the quiz instead of a dead-end payment form. Lead-carrying (post-quiz)
-  // and authenticated (resubscribe/app) visitors keep normal pricing.
-  if (!leadId) {
-    const supabase = await createClient()
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-    if (!user) redirect("/quiz")
+  if (leadId) {
+    redirect(`/result/${encodeURIComponent(leadId)}?focus=unlock-plan`)
   }
 
-  const showResubBanner = sp.reason === "resubscribe"
-  const rawInterval = sp.interval
-  const initialInterval =
-    rawInterval === "month" || rawInterval === "quarter" || rawInterval === "year"
-      ? rawInterval
-      : null
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) redirect("/quiz")
 
-  return (
-    <main className="mx-auto max-w-5xl px-4 py-12">
-      {showResubBanner && (
-        <div className="mb-6 rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-100">
-          Dein Abo ist abgelaufen — jetzt wieder freischalten.
-        </div>
-      )}
-      <header className="mb-10 text-center">
-        <h1 className="font-header text-4xl">Dein personalisierter Haar-Concierge</h1>
-        <p className="mt-3 text-lg text-muted-foreground">Wähle deinen Plan — jederzeit kündbar.</p>
-      </header>
-      <PricingCards leadId={leadId} initialInterval={initialInterval} />
-    </main>
-  )
+  let active: boolean
+  try {
+    active = await hasCurrentAppAccess(supabase, { userId: user.id, email: user.email })
+  } catch (error) {
+    console.warn("[pricing] app access check failed", error)
+    const params = new URLSearchParams({ reason: "access_check_unavailable" })
+    params.set("next", sanitizeReactivationReturnDestination(sp.next))
+    redirect(`/reactivate?${params.toString()}`)
+  }
+
+  if (active) redirect("/profile#mitgliedschaft")
+
+  const params = new URLSearchParams({ reason: "expired" })
+  if (sp.interval === "month" || sp.interval === "quarter" || sp.interval === "year") {
+    params.set("interval", sp.interval)
+  }
+  params.set("next", sanitizeReactivationReturnDestination(sp.next))
+  redirect(`/reactivate?${params.toString()}`)
 }

@@ -8,7 +8,6 @@ import { useQuizStore } from "@/lib/quiz/store"
 import { trackAppEvent } from "@/lib/analytics/track-app-event"
 import { isSubscriptionActive } from "@/lib/stripe/gating"
 import { useAuth } from "@/providers/auth-provider"
-import { QuizResultOfferPage } from "./quiz-result-offer-page"
 import { QuizResultsView } from "./quiz-results-view"
 
 interface ResultArtifactEmailTriggerState {
@@ -28,6 +27,26 @@ export function shouldTriggerResultArtifactEmail({
   if (previouslyTriggeredLeadId === leadId) return false
 
   return true
+}
+
+interface QuizResultRedirectState {
+  leadId: string | null
+  authLoading: boolean
+  isCheckingSignedInSubscription: boolean
+  canGoStraightToRoutine: boolean
+}
+
+export function getQuizResultRedirectPath({
+  leadId,
+  authLoading,
+  isCheckingSignedInSubscription,
+  canGoStraightToRoutine,
+}: QuizResultRedirectState): string | null {
+  if (!leadId) return null
+  if (authLoading || isCheckingSignedInSubscription) return null
+  if (canGoStraightToRoutine) return null
+
+  return `/result/${encodeURIComponent(leadId)}?entry=quiz_completion`
 }
 
 function getSafeReturnToPath(value: string | null): string | null {
@@ -55,6 +74,7 @@ export function QuizResults() {
   } | null>(null)
   const checkoutAnalyticsCapturedRef = useRef(false)
   const resultArtifactEmailLeadRef = useRef<string | null>(null)
+  const resultRedirectRef = useRef<string | null>(null)
   const narrative = buildQuizResultNarrative(answers)
   const returnTo = searchParams.get("returnTo")
   const isRetakeMode = searchParams.get("mode") === "retake"
@@ -69,8 +89,14 @@ export function QuizResults() {
   )
   const canGoStraightToRoutine = Boolean(user && leadId && (profileHasAccess || serverHasAccess))
   const isCheckingSignedInSubscription = Boolean(
-    user && leadId && (loading || profile === null || isCheckingServerAccess),
+    user && leadId && (loading || isCheckingServerAccess),
   )
+  const resultRedirectPath = getQuizResultRedirectPath({
+    leadId,
+    authLoading: loading,
+    isCheckingSignedInSubscription,
+    canGoStraightToRoutine,
+  })
   const cta = getQuizResultCta({ canGoStraightToRoutine })
 
   const captureQuizCompleted = useCallback(() => {
@@ -153,6 +179,13 @@ export function QuizResults() {
     }).catch(() => {})
   }, [canGoStraightToRoutine, isCheckingSignedInSubscription, leadId, loading])
 
+  useEffect(() => {
+    if (!resultRedirectPath || resultRedirectRef.current === resultRedirectPath) return
+
+    resultRedirectRef.current = resultRedirectPath
+    router.replace(resultRedirectPath)
+  }, [resultRedirectPath, router])
+
   const handleStart = () => {
     captureQuizCompleted()
 
@@ -172,9 +205,13 @@ export function QuizResults() {
   }
 
   if (!canGoStraightToRoutine) {
-    if (isCheckingSignedInSubscription) {
+    if (loading || isCheckingSignedInSubscription) {
       return (
-        <div className="mx-auto flex min-h-[420px] w-full max-w-[520px] flex-col items-center justify-center px-5 text-center">
+        <div
+          aria-live="polite"
+          className="mx-auto flex min-h-[420px] w-full max-w-[520px] flex-col items-center justify-center px-5 text-center"
+          role="status"
+        >
           <div className="mb-4 size-10 animate-spin rounded-full border-2 border-[var(--brand-plum-ice)] border-t-[var(--brand-plum)]" />
           <p className="font-header text-[24px] font-medium text-[var(--brand-plum-darkest)]">
             Wir prüfen deinen Zugang
@@ -186,14 +223,40 @@ export function QuizResults() {
       )
     }
 
+    if (!leadId) {
+      return (
+        <div className="mx-auto flex min-h-[420px] w-full max-w-[520px] flex-col items-center justify-center px-5 text-center">
+          <p className="font-header text-[24px] font-medium text-[var(--brand-plum-darkest)]">
+            Dein Ergebnis konnte nicht geöffnet werden
+          </p>
+          <p className="mt-2 max-w-[34ch] text-sm leading-relaxed text-muted-foreground">
+            Lade die Seite bitte neu und versuche es noch einmal.
+          </p>
+          <button
+            className="mt-6 min-h-[48px] rounded-[12px] bg-[var(--brand-coral)] px-6 py-3 text-[13px] font-bold text-white"
+            onClick={() => window.location.reload()}
+            type="button"
+          >
+            Ergebnis neu laden
+          </button>
+        </div>
+      )
+    }
+
     return (
-      <QuizResultOfferPage
-        name={lead.name}
-        narrative={narrative}
-        quizAnswers={answers}
-        leadId={leadId}
-        onCheckoutOpen={captureQuizCompleted}
-      />
+      <div
+        aria-live="polite"
+        className="mx-auto flex min-h-[420px] w-full max-w-[520px] flex-col items-center justify-center px-5 text-center"
+        role="status"
+      >
+        <div className="mb-4 size-10 animate-spin rounded-full border-2 border-[var(--brand-plum-ice)] border-t-[var(--brand-plum)]" />
+        <p className="font-header text-[24px] font-medium text-[var(--brand-plum-darkest)]">
+          Dein Ergebnis wird geöffnet
+        </p>
+        <p className="mt-2 max-w-[34ch] text-sm leading-relaxed text-muted-foreground">
+          Einen Moment bitte.
+        </p>
+      </div>
     )
   }
 

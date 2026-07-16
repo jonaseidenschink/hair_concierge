@@ -20,6 +20,25 @@ const BottomSheetContext = React.createContext<BottomSheetContextValue>({
   titleId: "",
 })
 
+function getTabbableElements(panel: HTMLElement): HTMLElement[] {
+  return Array.from(
+    panel.querySelectorAll<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+    ),
+  ).filter((element) => {
+    const style = window.getComputedStyle(element)
+    return (
+      element.tabIndex >= 0 &&
+      !element.matches(":disabled") &&
+      !element.closest('[aria-disabled="true"]') &&
+      !element.closest("[inert]") &&
+      style.display !== "none" &&
+      style.visibility !== "hidden" &&
+      element.getClientRects().length > 0
+    )
+  })
+}
+
 // --- BottomSheet ---
 
 interface BottomSheetProps {
@@ -48,10 +67,13 @@ function BottomSheet({
 
 // --- BottomSheetContent ---
 
-type BottomSheetContentProps = React.HTMLAttributes<HTMLDivElement>
+interface BottomSheetContentProps extends React.HTMLAttributes<HTMLDivElement> {
+  rootClassName?: string
+  footer?: React.ReactNode
+}
 
 const BottomSheetContent = React.forwardRef<HTMLDivElement, BottomSheetContentProps>(
-  ({ className, children, ...props }, ref) => {
+  ({ className, rootClassName, footer, children, style, ...props }, ref) => {
     const { open, onOpenChange, titleId } = React.useContext(BottomSheetContext)
     const [mounted, setMounted] = React.useState(false)
     const [visible, setVisible] = React.useState(false)
@@ -60,6 +82,8 @@ const BottomSheetContent = React.forwardRef<HTMLDivElement, BottomSheetContentPr
     // Drag state
     const [dragY, setDragY] = React.useState(0)
     const [dragging, setDragging] = React.useState(false)
+    const dragYRef = React.useRef(0)
+    const draggingRef = React.useRef(false)
     const dragStartY = React.useRef(0)
     // Drag candidate before the movement threshold is reached. We must NOT
     // setPointerCapture on plain taps: with capture active the browser
@@ -95,13 +119,33 @@ const BottomSheetContent = React.forwardRef<HTMLDivElement, BottomSheetContentPr
       }
     }, [open, visible])
 
-    const handleAnimationEnd = React.useCallback(() => {
-      if (closing) {
-        setVisible(false)
-        setClosing(false)
-        setDragY(0)
-      }
-    }, [closing])
+    const finishClose = React.useCallback(() => {
+      setVisible(false)
+      setClosing(false)
+      setDragY(0)
+      dragYRef.current = 0
+      draggingRef.current = false
+    }, [])
+
+    const handleAnimationEnd = React.useCallback(
+      (event: React.AnimationEvent) => {
+        if (event.currentTarget === event.target && closing) finishClose()
+      },
+      [closing, finishClose],
+    )
+
+    React.useEffect(() => {
+      if (!closing || !panelRef.current) return
+      const durations = getComputedStyle(panelRef.current)
+        .animationDuration.split(",")
+        .map((value) => value.trim())
+        .map((value) =>
+          value.endsWith("ms") ? Number.parseFloat(value) : Number.parseFloat(value) * 1_000,
+        )
+        .filter(Number.isFinite)
+      const timeout = window.setTimeout(finishClose, Math.max(0, ...durations) + 50)
+      return () => window.clearTimeout(timeout)
+    }, [closing, finishClose])
 
     // Focus management: auto-focus close button on open, restore focus on close
     React.useEffect(() => {
@@ -126,9 +170,7 @@ const BottomSheetContent = React.forwardRef<HTMLDivElement, BottomSheetContentPr
         const panel = panelRef.current
         if (!panel) return
 
-        const focusable = panel.querySelectorAll<HTMLElement>(
-          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-        )
+        const focusable = getTabbableElements(panel)
         if (focusable.length === 0) return
 
         const first = focusable[0]
@@ -196,9 +238,11 @@ const BottomSheetContent = React.forwardRef<HTMLDivElement, BottomSheetContentPr
             // Real downward drag: take over the gesture now.
             dragStartY.current = pending.startY
             pendingDrag.current = null
+            draggingRef.current = true
             setDragging(true)
             panelRef.current?.setPointerCapture(e.pointerId)
-            setDragY(Math.max(0, delta))
+            dragYRef.current = Math.max(0, delta)
+            setDragY(dragYRef.current)
           } else if (delta < -12) {
             // Upward movement is not a dismiss gesture.
             pendingDrag.current = null
@@ -208,37 +252,56 @@ const BottomSheetContent = React.forwardRef<HTMLDivElement, BottomSheetContentPr
         if (!dragging) return
         const delta = e.clientY - dragStartY.current
         // Only allow dragging downward
-        setDragY(Math.max(0, delta))
+        dragYRef.current = Math.max(0, delta)
+        setDragY(dragYRef.current)
       },
       [dragging],
     )
 
-    const handlePointerUp = React.useCallback(() => {
-      pendingDrag.current = null
-      if (!dragging) return
-      setDragging(false)
-      if (dragY > 80) {
-        onOpenChange(false)
-        // Don't reset dragY — handleAnimationEnd cleans it up after exit animation
-      } else {
-        setDragY(0)
+    const handlePointerUp = React.useCallback(
+      (event: React.PointerEvent) => {
+        const pending = pendingDrag.current
+        pendingDrag.current = null
+        if (!draggingRef.current) {
+          if (pending && event.clientY - pending.startY > 80) onOpenChange(false)
+          return
+        }
+        draggingRef.current = false
+        setDragging(false)
+        if (dragYRef.current > 80) {
+          onOpenChange(false)
+          // Don't reset dragY — handleAnimationEnd cleans it up after exit animation
+        } else {
+          dragYRef.current = 0
+          setDragY(0)
+        }
+      },
+      [onOpenChange],
+    )
+
+    const handlePointerCancel = React.useCallback((event: React.PointerEvent) => {
+      const pending = pendingDrag.current
+      if (!draggingRef.current && (!pending || pending.pointerId !== event.pointerId)) {
+        return
       }
-    }, [dragging, dragY, onOpenChange])
+      pendingDrag.current = null
+      draggingRef.current = false
+      dragYRef.current = 0
+      setDragging(false)
+      setDragY(0)
+    }, [])
 
     if (!mounted || !visible) return null
 
-    const spring = "cubic-bezier(0.32, 0.72, 0, 1)"
-
     return createPortal(
-      <div className="fixed inset-0 z-50">
+      <div className={cn("bottom-sheet-root fixed inset-0 z-50", rootClassName)}>
         {/* Backdrop */}
         <div
-          className={cn("fixed inset-0 bg-black/20", dragging && "pointer-events-none")}
-          style={{
-            animation: closing
-              ? `backdropFadeOut 250ms ${spring} forwards`
-              : `backdropFadeIn 350ms ${spring} forwards`,
-          }}
+          className={cn(
+            "bottom-sheet-backdrop fixed inset-0 bg-black/20",
+            dragging && "pointer-events-none",
+          )}
+          data-state={closing ? "closed" : "open"}
           onClick={() => onOpenChange(false)}
         />
         {/* Panel */}
@@ -247,26 +310,28 @@ const BottomSheetContent = React.forwardRef<HTMLDivElement, BottomSheetContentPr
           role="dialog"
           aria-modal="true"
           aria-labelledby={titleId}
+          data-bottom-sheet-panel
+          data-dragging={dragging ? "true" : "false"}
+          data-state={closing ? "closed" : "open"}
           className={cn(
-            "fixed inset-x-0 bottom-0 z-50 flex max-h-[60vh] flex-col rounded-t-2xl bg-background shadow-[0_-4px_32px_rgba(0,0,0,0.3)]",
+            "bottom-sheet-panel fixed inset-x-0 bottom-0 z-50 flex max-h-[60vh] touch-pan-y flex-col rounded-t-2xl bg-background shadow-[0_-4px_32px_rgba(0,0,0,0.3)]",
             className,
           )}
           style={{
-            animation: closing
-              ? `bottomSheetDown 250ms ${spring} forwards`
-              : `bottomSheetUp 350ms ${spring} forwards`,
+            ...style,
             transform: dragY > 0 ? `translateY(${dragY}px)` : undefined,
-            transition: dragging ? "none" : undefined,
           }}
+          {...props}
           onAnimationEnd={handleAnimationEnd}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
-          {...props}
+          onPointerCancel={handlePointerCancel}
+          onLostPointerCapture={handlePointerCancel}
         >
           {/* Drag handle */}
           <div
-            className="flex shrink-0 items-center justify-center pb-1 pt-3"
+            className="flex shrink-0 touch-none items-center justify-center pb-1 pt-3"
             data-bottom-sheet-handle
           >
             <div className="h-1.5 w-10 rounded-full bg-muted-foreground/30" />
@@ -275,17 +340,23 @@ const BottomSheetContent = React.forwardRef<HTMLDivElement, BottomSheetContentPr
           {/* Close button */}
           <button
             ref={closeButtonRef}
-            className="absolute right-3 top-2 flex h-10 w-10 items-center justify-center rounded-md opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+            type="button"
+            className="absolute right-3 top-2 z-10 flex h-10 w-10 items-center justify-center rounded-md bg-background/95 opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
             onClick={() => onOpenChange(false)}
           >
             <X className="h-4 w-4" />
-            <span className="sr-only">Close</span>
+            <span className="sr-only">Schließen</span>
           </button>
 
           {/* Scrollable content */}
           <div ref={contentRef} className="overflow-y-auto px-6 pb-6">
             {children}
           </div>
+          {footer ? (
+            <div className="shrink-0 border-t bg-background px-6 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3">
+              {footer}
+            </div>
+          ) : null}
         </div>
       </div>,
       document.body,

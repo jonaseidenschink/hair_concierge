@@ -1,22 +1,28 @@
 import { createServerClient } from "@supabase/ssr"
 import { NextResponse, type NextRequest } from "next/server"
 import { getAuthenticatedAppRedirect, resolveIntakeState } from "@/lib/auth/intake-state"
-import { findCurrentManualAccessGrant } from "@/lib/billing/subscriptions"
+import { hasCurrentAppAccess } from "@/lib/billing/subscriptions"
 import { getUnauthenticatedRedirectTarget } from "@/lib/auth/unauthenticated-redirect"
+import { sanitizeReactivationReturnDestination } from "@/lib/reactivation/return-destination"
 import {
   classifyRoute,
   pathMatchesRoutePrefix,
   type RouteEnvironment,
 } from "@/lib/auth/route-classification"
 
-const AUTHENTICATED_APP_ROUTE_PREFIXES = ["/chat", "/routine"]
+const AUTHENTICATED_APP_ROUTE_PREFIXES = ["/chat", "/routine", "/tracker"]
 const SUB_REQUIRED_PREFIXES = [
   "/onboarding",
   "/chat",
   "/api/chat",
   "/api/product-intake",
+  "/profile",
+  "/api/profile",
+  "/api/memory",
   "/routine",
   "/api/routine",
+  "/tracker",
+  "/api/tracker",
 ]
 const ROUTES_WITHOUT_AUTH_LOOKUP = [
   "/",
@@ -162,59 +168,37 @@ export async function updateSession(request: NextRequest) {
   const needsSub = requiresSubscriptionPath(pathname)
 
   if (needsSub) {
-    const { data: billingRows, error: billingError } = await supabase
-      .from("billing_subscriptions")
-      .select("entitlement_status, current_period_end, cancel_at_period_end")
-      .eq("user_id", user.id)
-
-    const now = Date.now()
-    let active = false
-
-    if (!billingError) {
-      active = (
-        (billingRows as Array<{
-          entitlement_status: string | null
-          current_period_end: string | null
-          cancel_at_period_end: boolean | null
-        }> | null) ?? []
-      ).some((row) => {
-        if (row.entitlement_status === "active" || row.entitlement_status === "past_due")
-          return true
-        if (row.entitlement_status !== "canceled" || !row.cancel_at_period_end) return false
-        const timestamp = Date.parse(row.current_period_end ?? "")
-        return Number.isFinite(timestamp) && timestamp > now
-      })
-    } else {
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("subscription_status, current_period_end")
-        .eq("id", user.id)
-        .maybeSingle()
-
-      const legacyStatus = profile?.subscription_status
-      const legacyPeriodEnd = Date.parse(profile?.current_period_end ?? "")
-      active =
-        legacyStatus === "active" ||
-        legacyStatus === "past_due" ||
-        (legacyStatus === "canceled" && Number.isFinite(legacyPeriodEnd) && legacyPeriodEnd > now)
-    }
-
-    if (!active) {
-      const manualGrant = await findCurrentManualAccessGrant(
-        supabase,
-        { userId: user.id, email: user.email },
-        new Date(now),
-      ).catch((error) => {
-        console.warn("[billing] manual access grant check failed", error)
-        return null
-      })
-      active = Boolean(manualGrant)
-    }
-
-    if (!active) {
+    let active: boolean
+    try {
+      active = await hasCurrentAppAccess(supabase, { userId: user.id, email: user.email })
+    } catch (error) {
+      console.warn("[billing] app access check failed", error)
+      if (pathMatchesRoutePrefix(pathname, "/api")) {
+        return NextResponse.json({ error: "access_check_unavailable" }, { status: 503 })
+      }
       const url = request.nextUrl.clone()
-      url.pathname = "/pricing"
-      url.searchParams.set("reason", "resubscribe")
+      const next = sanitizeReactivationReturnDestination(
+        `${request.nextUrl.pathname}${request.nextUrl.search}`,
+      )
+      url.pathname = "/reactivate"
+      url.search = ""
+      url.searchParams.set("reason", "access_check_unavailable")
+      url.searchParams.set("next", next)
+      return redirectWithSupabaseCookies(url, supabaseResponse)
+    }
+
+    if (!active) {
+      if (pathMatchesRoutePrefix(pathname, "/api")) {
+        return NextResponse.json({ error: "subscription_required" }, { status: 403 })
+      }
+      const url = request.nextUrl.clone()
+      const next = sanitizeReactivationReturnDestination(
+        `${request.nextUrl.pathname}${request.nextUrl.search}`,
+      )
+      url.pathname = "/reactivate"
+      url.search = ""
+      url.searchParams.set("reason", "expired")
+      url.searchParams.set("next", next)
       return redirectWithSupabaseCookies(url, supabaseResponse)
     }
   }

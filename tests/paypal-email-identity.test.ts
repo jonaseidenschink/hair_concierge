@@ -206,6 +206,10 @@ function createSupabaseStub(seed?: {
             state.filters.push({ column, value, op: "is" })
             return this
           },
+          in(column: string, value: unknown[]) {
+            state.filters.push({ column, value, op: "in" })
+            return this
+          },
           select(columns = "*") {
             state.select = columns
             const matched = applyFilters(rows() as unknown as Record<string, unknown>[])

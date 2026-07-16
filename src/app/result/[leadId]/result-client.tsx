@@ -8,7 +8,7 @@ import { renderOfferVariant } from "@/funnels/offers/registry"
 import { getQuizResultCta } from "@/lib/quiz/result-cta"
 import { buildQuizResultNarrative } from "@/lib/quiz/result-narrative"
 import type { QuizAnswers } from "@/lib/quiz/types"
-import type { FunnelAnalyticsEnvelope } from "@/lib/analytics/events"
+import type { FunnelAnalyticsEnvelope, OfferEntryContext } from "@/lib/analytics/events"
 
 type ResultPageFocusTarget = "unlock-plan" | "pricing" | null
 
@@ -16,6 +16,7 @@ export function ResultPageClient({
   leadId,
   name,
   quizAnswers,
+  entryContext,
   focusRoutine,
   focusTarget = null,
   hasAccess,
@@ -25,6 +26,7 @@ export function ResultPageClient({
   leadId: string
   name: string
   quizAnswers: QuizAnswers
+  entryContext?: OfferEntryContext
   focusRoutine: boolean
   focusTarget?: ResultPageFocusTarget
   hasAccess: boolean
@@ -33,6 +35,7 @@ export function ResultPageClient({
 }) {
   const narrative = buildQuizResultNarrative(quizAnswers)
   const cta = getQuizResultCta({ canGoStraightToRoutine: hasAccess })
+  const resolvedEntryContext = entryContext ?? (focusRoutine ? "routine_return" : "saved_result")
 
   useEffect(() => {
     if (!focusTarget) return
@@ -57,8 +60,12 @@ export function ResultPageClient({
   }
 
   const offer = renderOfferVariant(offerVariant, {
+    entryContext: resolvedEntryContext,
+    leadId,
     name,
     narrative,
+    offerTracking,
+    offerVariant,
     quizAnswers,
     focusRoutine,
     pricingSlot: <ResultOfferPricing leadId={leadId} offerTracking={offerTracking} />,

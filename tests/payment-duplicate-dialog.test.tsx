@@ -14,8 +14,8 @@ const paypalButtonSource = readFileSync(
   new URL("../src/components/checkout/paypal-subscription-button.tsx", import.meta.url),
   "utf8",
 )
-const pricingCardsSource = readFileSync(
-  new URL("../src/app/pricing/pricing-cards.tsx", import.meta.url),
+const membershipReactivationSource = readFileSync(
+  new URL("../src/components/reactivation/membership-reactivation-checkout.tsx", import.meta.url),
   "utf8",
 )
 const resultOfferPricingSource = readFileSync(
@@ -63,8 +63,8 @@ test("PayPal duplicate responses open the modal instead of redirecting to welcom
   )
 })
 
-test("Stripe duplicate responses are handled in both checkout parents", () => {
-  for (const source of [pricingCardsSource, resultOfferPricingSource]) {
+test("Stripe duplicate responses are handled in offer and membership reactivation checkout", () => {
+  for (const source of [membershipReactivationSource, resultOfferPricingSource]) {
     assert.match(source, /ActiveSubscriptionDialog/)
     assert.match(source, /isCheckoutAccessAlreadyExistsResponse/)
     assert.match(source, /readCheckoutAccessAlreadyExistsEmail/)

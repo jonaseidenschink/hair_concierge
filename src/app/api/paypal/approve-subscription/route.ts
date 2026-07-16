@@ -53,6 +53,30 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "paypal token mismatch" }, { status: 400 })
     }
     if (intent.status === "duplicate") {
+      try {
+        await cancelAndMarkPayPalDuplicate({
+          cancelPayPalSubscription: defaultCancelPayPalSubscription,
+          reason: intent.duplicate_reason ?? "reactivation_reservation_race",
+          retrievePayPalSubscription,
+          subscriptionId: subscription.id,
+          supabase: admin,
+          token,
+        })
+      } catch (error) {
+        if (error instanceof PayPalDuplicateCancellationError) {
+          captureCheckoutException(error, {
+            provider: "paypal",
+            stage: "paypal_approve_subscription",
+            source: checkoutSource,
+            paypalSubscriptionId: subscription.id,
+            paypalTokenPresent: true,
+            status: 502,
+            reason: "duplicate_cancel_failed",
+          })
+          return NextResponse.json({ error: "paypal_duplicate_cancel_failed" }, { status: 502 })
+        }
+        throw error
+      }
       return createPayPalDuplicateCheckoutResponse(intent)
     }
     if (intent.provider_subscription_id && intent.provider_subscription_id !== subscription.id) {

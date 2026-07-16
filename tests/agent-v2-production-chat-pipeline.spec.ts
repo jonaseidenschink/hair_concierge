@@ -19,6 +19,8 @@ import type {
   AgentV2RoutineThreadContext,
   AgentV2SessionMemoryWrite,
 } from "../src/lib/agent-v2/contracts"
+import type { TrackingToolContext } from "../src/lib/agent/tools/tracking-context"
+import type { TrackingInsightContext } from "../src/lib/agent/tools/tracking-insights"
 import type { AgentV2ResponsesTurnResult } from "../src/lib/agent-v2/runtime/responses-agent"
 import type { AgentV2SelectProductsProjection } from "../src/lib/agent-v2/tools/select-products-projection"
 import type { ConversationState, HairProfile, Message, Product } from "../src/lib/types"
@@ -701,6 +703,74 @@ test("AgentV2 production pipeline activates matched routine shampoo identity fro
     name: "Syoss Intense Volume Shampoo",
     category: "shampoo",
     original_user_message: "Weißt du welches Shampoo ich gerade benutze?",
+  })
+})
+
+test("AgentV2 production pipeline keeps raw tracker facts separate from explanation-only insights", async () => {
+  let receivedTrackingContext: TrackingToolContext | null | undefined
+  let receivedTrackingInsightContext: TrackingInsightContext | null | undefined
+
+  const result = await runAgentV2ProductionPipeline(
+    {
+      message: "Wann habe ich zuletzt meine Haare gewaschen?",
+      conversationId: "conversation-1",
+      userId: "user-1",
+      requestId: "request-tracker-context",
+    },
+    {
+      verifyConversationOwnership,
+      loadConversationHistory: async () => [],
+      getUserContext: async () => ({
+        profile: createCompleteHairProfile(),
+        routine_inventory: [],
+        relevant_memory: [],
+        derived_signals: [],
+        suggested_overlays: [],
+        missing_profile: [],
+      }),
+      loadUserMemoryContext: async () => ({
+        enabled: true,
+        entries: [],
+        promptContext: null,
+        dislikedProductNames: [],
+      }),
+      loadConversationState: async (): Promise<ConversationState> =>
+        createDefaultConversationState(),
+      loadTrackerDays: async () => ({
+        status: "available",
+        reason: "loaded",
+        referenceDate: "2099-01-01",
+        activeDismissals: [],
+        days: [
+          {
+            loggedOn: "2099-01-01",
+            dayType: "wash",
+            products: [
+              { category: "shampoo", productName: "Test Shampoo", userProductUsageId: null },
+            ],
+          },
+        ],
+      }),
+      client: { responses: { create: async () => ({ output: [] }) } },
+      runAgentV2ResponsesTurn: async (params) => {
+        receivedTrackingContext = params.userContext.trackingContext
+        receivedTrackingInsightContext = params.userContext.trackingInsightContext
+        return createAgentV2Result()
+      },
+    },
+  )
+
+  assert.equal(receivedTrackingContext?.mode, "tracking_observation_context")
+  assert.equal(receivedTrackingContext?.logged_days[0]?.date, "2099-01-01")
+  assert.equal(receivedTrackingInsightContext?.mode, "tracking_insight_context")
+  assert.equal(receivedTrackingInsightContext?.coverage.sufficient, false)
+  assert.equal(receivedTrackingInsightContext?.authority.may_update_profile, false)
+  assert.deepEqual(result.debugTrace.agent_v2_trace?.tracker_context, {
+    load_status: "available",
+    load_reason: "loaded",
+    logged_day_count: 1,
+    insight_count: 0,
+    load_ms: result.debugTrace.agent_v2_trace?.tracker_context?.load_ms,
   })
 })
 

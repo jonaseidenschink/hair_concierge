@@ -11,8 +11,23 @@ import {
 } from "../src/lib/funnel/packages"
 
 test("resolves the default organic package", () => {
-  assert.equal(resolveDefaultFunnelPackage().key, DEFAULT_FUNNEL_PACKAGE_KEY)
-  assert.equal(resolveDefaultFunnelPackage().slug, null)
+  const funnelPackage = resolveDefaultFunnelPackage()
+
+  assert.equal(funnelPackage.key, DEFAULT_FUNNEL_PACKAGE_KEY)
+  assert.equal(funnelPackage.slug, null)
+  assert.equal(funnelPackage.offerVariant, "app-value-stack")
+})
+
+test("resolves the active Meta routine package separately from organic", () => {
+  const organicPackage = resolveDefaultFunnelPackage()
+  const metaPackage = getFunnelPackageBySlug("routine")
+
+  assert.equal(metaPackage?.key, "meta_routine_v1")
+  assert.equal(metaPackage?.channel, "meta")
+  assert.equal(metaPackage?.status, "active")
+  assert.notEqual(metaPackage?.key, organicPackage.key)
+  assert.equal(metaPackage?.landingVariant, organicPackage.landingVariant)
+  assert.equal(metaPackage?.offerVariant, organicPackage.offerVariant)
 })
 
 test("resolves the placeholder campaign package by slug", () => {
@@ -44,8 +59,15 @@ test("stored session offer variant wins over the current package mapping", () =>
   assert.equal(
     resolveOfferVariantForSession({
       packageKey: "default_organic",
-      offerVariant: "historical-offer",
+      offerVariant: "default",
     }),
-    "historical-offer",
+    "default",
+  )
+})
+
+test("a session without a stored offer uses its package mapping", () => {
+  assert.equal(
+    resolveOfferVariantForSession({ packageKey: "meta_routine_v1", offerVariant: null }),
+    "app-value-stack",
   )
 })

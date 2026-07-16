@@ -26,12 +26,25 @@ const defaultLandingSource = readFileSync(
   new URL("../src/funnels/landing/default.tsx", import.meta.url),
   "utf8",
 )
+const quizResultsSource = readFileSync(
+  new URL("../src/components/quiz/quiz-results.tsx", import.meta.url),
+  "utf8",
+)
 
 test("every package references registered landing and offer variants", () => {
   for (const funnelPackage of FUNNEL_PACKAGES) {
     assert.ok(funnelPackage.landingVariant in LANDING_VARIANTS, funnelPackage.key)
     assert.ok(funnelPackage.offerVariant in OFFER_VARIANTS, funnelPackage.key)
   }
+})
+
+test("app value stack is registered once alongside the historical default offer", () => {
+  assert.ok("app-value-stack" in OFFER_VARIANTS)
+  assert.ok("default" in OFFER_VARIANTS)
+  assert.equal(
+    Object.keys(OFFER_VARIANTS).filter((variant) => variant === "app-value-stack").length,
+    1,
+  )
 })
 
 test("landing route owns tracking outside contributor variants", () => {
@@ -51,4 +64,17 @@ test("result route selects the historical offer variant stored on the funnel ses
   assert.match(funnelServerSource, /package_key, offer_variant, first_seen_at/)
   assert.match(funnelServerSource, /offerVariant: data\.offer_variant/)
   assert.match(resultPageSource, /resolveOfferVariantForSession\(funnelContext\)/)
+})
+
+test("result route keeps fresh quiz completions distinct from saved-result visits", () => {
+  assert.match(resultPageSource, /sp\.entry === "quiz_completion"/)
+  assert.match(resultPageSource, /entryContext=\{entryContext\}/)
+  assert.match(resultClientSource, /entryContext \?\? \(focusRoutine \? "routine_return"/)
+  assert.match(resultClientSource, /entryContext: resolvedEntryContext/)
+})
+
+test("quiz completion hands no-access results to the canonical result route", () => {
+  assert.doesNotMatch(quizResultsSource, /QuizResultOfferPage\b/)
+  assert.match(quizResultsSource, /\?entry=quiz_completion/)
+  assert.match(quizResultsSource, /router\.replace\(resultRedirectPath\)/)
 })

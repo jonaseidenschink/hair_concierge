@@ -9,6 +9,10 @@ import {
   PayPalCheckoutActivationError,
 } from "@/lib/paypal/checkout-activation"
 import { getPremiumTierId } from "@/lib/billing/tier-ids"
+import { getAuthenticatedCheckoutSuccessRedirect } from "@/lib/billing/checkout-success-redirect"
+import { findPayPalCheckoutIntentByToken } from "@/lib/paypal/checkout-intents"
+import { sanitizeReactivationReturnDestination } from "@/lib/reactivation/return-destination"
+import { markMembershipReactivationCheckoutCompleted } from "@/lib/reactivation/checkout-reservations"
 import { getStripe } from "@/lib/stripe/client"
 import {
   CheckoutActivationError,
@@ -79,12 +83,33 @@ async function renderStripeWelcome(session_id: string) {
       premiumTierId: await getPremiumTierId(admin),
       linkQuizToProfile,
     })
+    if (
+      session.metadata?.checkout_context === "membership_reactivation" &&
+      session.metadata.reactivation_reservation_id
+    ) {
+      await markMembershipReactivationCheckoutCompleted(
+        admin,
+        session.metadata.reactivation_reservation_id,
+        user.id,
+      ).catch((error) => {
+        console.warn("[welcome] Stripe reactivation reservation completion failed", error)
+      })
+    }
+    const returnDestination =
+      session.metadata?.checkout_context === "membership_reactivation"
+        ? sanitizeReactivationReturnDestination(session.metadata.return_destination)
+        : null
+    const redirectTo = await resolveAuthenticatedCheckoutRedirect(
+      supabase,
+      user.id,
+      returnDestination,
+    )
     return (
       <WelcomeClient
         activationSource={{ provider: "stripe", sessionId: session_id }}
         email={email}
         purchase={purchaseAnalytics}
-        redirectTo="/onboarding"
+        redirectTo={redirectTo}
         sessionId={session_id}
       />
     )
@@ -150,6 +175,32 @@ async function renderPayPalWelcome(token: string | undefined) {
   } = await supabase.auth.getUser()
 
   if (user?.email?.toLowerCase() === activation.email.toLowerCase()) {
+    const intent = await findPayPalCheckoutIntentByToken(admin, token)
+    const returnDestination =
+      intent?.metadata?.checkout_context === "membership_reactivation"
+        ? sanitizeReactivationReturnDestination(
+            typeof intent.metadata.return_destination === "string"
+              ? intent.metadata.return_destination
+              : null,
+          )
+        : null
+    if (
+      intent?.metadata?.checkout_context === "membership_reactivation" &&
+      typeof intent.metadata.reactivation_reservation_id === "string"
+    ) {
+      await markMembershipReactivationCheckoutCompleted(
+        admin,
+        intent.metadata.reactivation_reservation_id,
+        user.id,
+      ).catch((error) => {
+        console.warn("[welcome] PayPal reactivation reservation completion failed", error)
+      })
+    }
+    const redirectTo = await resolveAuthenticatedCheckoutRedirect(
+      supabase,
+      user.id,
+      returnDestination,
+    )
     return (
       <WelcomeClient
         activationSource={{ provider: "paypal", token }}
@@ -157,7 +208,7 @@ async function renderPayPalWelcome(token: string | undefined) {
         email={activation.email}
         providerSubscriberEmail={activation.providerSubscriberEmail}
         purchase={null}
-        redirectTo="/onboarding"
+        redirectTo={redirectTo}
       />
     )
   }
@@ -170,6 +221,28 @@ async function renderPayPalWelcome(token: string | undefined) {
       providerSubscriberEmail={activation.providerSubscriberEmail}
       purchase={null}
     />
+  )
+}
+
+async function resolveAuthenticatedCheckoutRedirect(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  reactivationReturnDestination: string | null,
+) {
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("onboarding_completed")
+    .eq("id", userId)
+    .maybeSingle()
+
+  if (error) {
+    console.warn("[welcome] could not resolve existing onboarding state", error)
+    return "/onboarding"
+  }
+
+  return getAuthenticatedCheckoutSuccessRedirect(
+    data?.onboarding_completed,
+    reactivationReturnDestination,
   )
 }
 

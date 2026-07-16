@@ -103,24 +103,32 @@ test("result offer preloads Stripe only after the offer component mounts", () =>
   const moduleScope = source.slice(0, source.indexOf("export function ResultOfferPricing"))
 
   assert.match(source, /from "@stripe\/stripe-js\/pure"/)
-  assert.doesNotMatch(source, /const stripePromise\s*=/)
+  assert.doesNotMatch(moduleScope, /const stripePromise\s*=/)
   assert.doesNotMatch(moduleScope, /loadStripe\(/)
   assert.match(source, /useEffect\(\(\) => \{\s*getStripePromise\(\)/)
 })
 
-test("result offer pricing view keeps the active funnel package with its own event id", () => {
+test("offer and profile reactivation pricing views keep funnel attribution with fresh event ids", () => {
   const source = read("src/components/quiz/result-offer-pricing.tsx")
-  const publicPricingSource = read("src/app/pricing/pricing-cards.tsx")
+  const profilePricingSource = read(
+    "src/components/reactivation/membership-reactivation-checkout.tsx",
+  )
 
   assert.doesNotMatch(source, /bootstrapFunnelContext\(\)\.then/)
+  assert.match(source, /const context: FunnelAnalyticsEnvelope \| null =/)
+  assert.match(source, /trackAppEvent\("pricing_viewed", \{[\s\S]*funnelEventId,/)
   assert.match(
     source,
-    /const context: FunnelAnalyticsEnvelope \| null = offerTracking \?\? getCurrentFunnelContext\(\)[\s\S]*trackAppEvent\("pricing_viewed", \{[\s\S]*funnelEventId,[\s\S]*funnelSessionId: context\?\.funnelSessionId,[\s\S]*funnelPackageKey: context\?\.funnelPackageKey/,
+    /funnelSessionId: offerContext\?\.funnelSessionId \?\? context\?\.funnelSessionId/,
   )
-  assert.doesNotMatch(publicPricingSource, /bootstrapFunnelContext\(\)\.then/)
   assert.match(
-    publicPricingSource,
-    /const context = getCurrentFunnelContext\(\)[\s\S]*trackAppEvent\("pricing_viewed", \{[\s\S]*funnelEventId,[\s\S]*funnelPackageKey: context\?\.funnelPackageKey/,
+    source,
+    /funnelPackageKey: offerContext\?\.funnelPackageKey \?\? context\?\.funnelPackageKey/,
+  )
+  assert.doesNotMatch(profilePricingSource, /bootstrapFunnelContext\(\)\.then/)
+  assert.match(
+    profilePricingSource,
+    /const context = getCurrentFunnelContext\(\)[\s\S]*trackAppEvent\("pricing_viewed", \{[\s\S]*funnelEventId: createFunnelEventId\(\),[\s\S]*funnelPackageKey: context\?\.funnelPackageKey/,
   )
 })
 

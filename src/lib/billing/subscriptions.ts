@@ -33,7 +33,7 @@ export async function upsertBillingSubscription(
     input.provider,
     input.provider_subscription_id,
   )
-  const { provider_subscriber_email, ...subscriptionInput } = input
+  const { provider_subscriber_email, metadata: inputMetadata, ...subscriptionInput } = input
   const row = {
     provider_customer_id: existing?.provider_customer_id ?? null,
     provider_subscriber_email:
@@ -44,7 +44,10 @@ export async function upsertBillingSubscription(
     current_period_end: existing?.current_period_end ?? null,
     cancel_at_period_end: existing?.cancel_at_period_end ?? false,
     cancelled_at: existing?.cancelled_at ?? null,
-    metadata: existing?.metadata ?? {},
+    metadata: {
+      ...(existing?.metadata ?? {}),
+      ...(inputMetadata ?? {}),
+    },
     ...subscriptionInput,
     updated_at: now,
   }

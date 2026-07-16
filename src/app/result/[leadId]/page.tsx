@@ -13,6 +13,7 @@ import { recordFunnelEvent, resolveFunnelContextForLead } from "@/lib/funnel/ser
 import { isFunnelAttributionEnabled } from "@/lib/funnel/flags"
 import { resolveOfferVariantForSession } from "@/lib/funnel/packages"
 import type { FunnelCookieContext } from "@/lib/funnel/cookie"
+import type { OfferEntryContext } from "@/lib/analytics/events"
 
 export const dynamic = "force-dynamic"
 
@@ -25,7 +26,7 @@ export const metadata: Metadata = {
 
 interface Props {
   params: Promise<{ leadId: string }>
-  searchParams: Promise<{ focus?: string }>
+  searchParams: Promise<{ entry?: string; focus?: string }>
 }
 
 interface LeadResultRow {
@@ -102,6 +103,11 @@ export default async function ResultPage({ params, searchParams }: Props) {
   const [{ leadId }, sp] = await Promise.all([params, searchParams])
   const focusRoutine = sp.focus === "routine"
   const focusTarget = sp.focus === "unlock-plan" ? "unlock-plan" : focusRoutine ? "pricing" : null
+  const entryContext: OfferEntryContext = focusRoutine
+    ? "routine_return"
+    : sp.entry === "quiz_completion"
+      ? "quiz_completion"
+      : "saved_result"
   const [lead, hasAccess] = await Promise.all([
     getLeadResult(leadId),
     getAuthenticatedResultAccess(),
@@ -120,6 +126,7 @@ export default async function ResultPage({ params, searchParams }: Props) {
       leadId={lead.id}
       name={lead.name}
       quizAnswers={quizAnswers}
+      entryContext={entryContext}
       focusRoutine={focusRoutine}
       focusTarget={focusTarget}
       hasAccess={hasAccess}

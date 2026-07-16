@@ -71,6 +71,11 @@ export const metaDestination = {
           trackMetaCheckoutStarted(
             data.source,
             data.interval ?? null,
+            {
+              currency: data.currency,
+              planId: data.planId,
+              value: data.value,
+            },
             data.funnelEventId,
             packageKey,
           ),

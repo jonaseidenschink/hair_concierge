@@ -4,7 +4,11 @@ import test from "node:test"
 import { customerIoDestination } from "../src/lib/analytics/destinations/customerio"
 import { metaDestination } from "../src/lib/analytics/destinations/meta"
 import { postHogDestination } from "../src/lib/analytics/destinations/posthog"
-import type { AppEventMap, AppEventName } from "../src/lib/analytics/events"
+import {
+  claimCheckoutFailure,
+  type AppEventMap,
+  type AppEventName,
+} from "../src/lib/analytics/events"
 import { eventRoutes } from "../src/lib/analytics/routes"
 import { trackAppEvent } from "../src/lib/analytics/track-app-event"
 import {
@@ -12,7 +16,8 @@ import {
   setCustomerIoBrowserClient,
 } from "../src/lib/customerio-tracking"
 import { posthog } from "../src/lib/analytics/runtime/posthog"
-import { initMetaPixel } from "../src/lib/meta-pixel"
+import { buildOfferViewedPayload } from "../src/lib/analytics/offer-viewed-payload"
+import { initMetaPixel, trackMetaCheckoutStarted } from "../src/lib/meta-pixel"
 
 type DestinationCall = {
   destination: "customerio" | "meta" | "posthog"
@@ -48,7 +53,7 @@ function withDestinationSpies(fn: (calls: DestinationCall[]) => void) {
   }
 }
 
-function createMetaDom() {
+function createMetaDom(hostname = "chaarlie.de") {
   const insertedScripts: Array<{ async?: boolean; id?: string; src?: string }> = []
   const scriptParent = {
     insertBefore(node: { async?: boolean; id?: string; src?: string }) {
@@ -69,6 +74,7 @@ function createMetaDom() {
     doc,
     insertedScripts,
     win: {
+      location: { hostname },
       sessionStorage: {
         getItem: () => null,
         setItem: () => undefined,
@@ -320,6 +326,371 @@ test("PostHog adapter strips undefined properties and sends the funnel package k
   }
 })
 
+test("offer diagnostics route only to PostHog with stable snake_case context", () => {
+  const diagnosticEvents = [
+    "checkout_start_failed",
+    "offer_checkout_opened",
+    "offer_cta_clicked",
+    "offer_faq_opened",
+    "offer_payment_method_selected",
+    "offer_plan_selected",
+    "offer_section_viewed",
+  ] as const
+
+  for (const eventName of diagnosticEvents) {
+    assert.deepEqual(eventRoutes[eventName], {
+      customerio: false,
+      meta: false,
+      posthog: true,
+    })
+  }
+
+  const originalCapture = posthog.capture
+  const calls: unknown[][] = []
+  posthog.capture = ((...args: unknown[]) => {
+    calls.push(args)
+    return true
+  }) as typeof posthog.capture
+
+  try {
+    postHogDestination.track("offer_section_viewed", {
+      conditionerModuleId: "conditioner-moisture-normal",
+      entryContext: "quiz_completion",
+      focusRoutine: false,
+      funnelEventId: "30000000-0000-4000-8000-000000000099",
+      funnelPackageKey: "default_organic",
+      funnelSessionId: "20000000-0000-4000-8000-000000000099",
+      leadId: "10000000-0000-4000-8000-000000000099",
+      needLane: "moisture",
+      offerRevision: "product_led_v1",
+      offerVariant: "default",
+      offerViewId: "40000000-0000-4000-8000-000000000099",
+      sectionId: "mini_routine",
+      sectionIndex: 1,
+      shampooModuleId: "shampoo-balanced-normal",
+      suggestedCategory: "leave_in",
+    })
+  } finally {
+    posthog.capture = originalCapture
+  }
+
+  assert.deepEqual(calls, [
+    [
+      "offer_section_viewed",
+      {
+        $insert_id: "30000000-0000-4000-8000-000000000099",
+        conditioner_module_id: "conditioner-moisture-normal",
+        entry_context: "quiz_completion",
+        focus_routine: false,
+        funnel_package_key: "default_organic",
+        funnel_session_id: "20000000-0000-4000-8000-000000000099",
+        lead_id: "10000000-0000-4000-8000-000000000099",
+        need_lane: "moisture",
+        offer_revision: "product_led_v1",
+        offer_variant: "default",
+        offer_view_id: "40000000-0000-4000-8000-000000000099",
+        section_id: "mini_routine",
+        section_index: 1,
+        shampoo_module_id: "shampoo-balanced-normal",
+        suggested_category: "leave_in",
+      },
+    ],
+  ])
+})
+
+test("checkout failure dedupe is scoped to the attempt and stable failure branch", () => {
+  const seen = new Set<string>()
+
+  assert.equal(
+    claimCheckoutFailure(
+      seen,
+      "50000000-0000-4000-8000-000000000001",
+      "paypal",
+      "provider_session",
+      "paypal_js_load_failed",
+    ),
+    true,
+  )
+  assert.equal(
+    claimCheckoutFailure(
+      seen,
+      "50000000-0000-4000-8000-000000000001",
+      "paypal",
+      "provider_session",
+      "paypal_js_load_failed",
+    ),
+    false,
+  )
+  assert.equal(
+    claimCheckoutFailure(
+      seen,
+      "50000000-0000-4000-8000-000000000002",
+      "paypal",
+      "provider_session",
+      "paypal_js_load_failed",
+    ),
+    true,
+  )
+})
+
+test("PostHog joins offer checkout diagnostics by checkout attempt", () => {
+  const originalCapture = posthog.capture
+  const calls: unknown[][] = []
+  posthog.capture = ((...args: unknown[]) => {
+    calls.push(args)
+    return true
+  }) as typeof posthog.capture
+
+  try {
+    postHogDestination.track("checkout_start_failed", {
+      checkoutAttemptId: "50000000-0000-4000-8000-000000000001",
+      conditionerModuleId: "conditioner-moisture-normal",
+      currency: "EUR",
+      entryContext: "quiz_completion",
+      errorCode: "paypal_js_load_failed",
+      failureStage: "provider_session",
+      focusRoutine: false,
+      interval: "quarter",
+      needLane: "moisture",
+      offerRevision: "product_led_v1",
+      offerVariant: "default",
+      offerViewId: "40000000-0000-4000-8000-000000000099",
+      planId: "premium_quarter",
+      provider: "paypal",
+      retryable: true,
+      shampooModuleId: "shampoo-balanced-normal",
+      suggestedCategory: "leave_in",
+      value: 34.99,
+    })
+  } finally {
+    posthog.capture = originalCapture
+  }
+
+  assert.equal(
+    (calls[0]?.[1] as Record<string, unknown>)?.checkout_attempt_id,
+    "50000000-0000-4000-8000-000000000001",
+  )
+  assert.equal((calls[0]?.[1] as Record<string, unknown>)?.error_code, "paypal_js_load_failed")
+  assert.equal((calls[0]?.[1] as Record<string, unknown>)?.sdk_error, undefined)
+})
+
+test("PostHog pricing view keeps offer diagnostics alongside historical pricing fields", () => {
+  const originalCapture = posthog.capture
+  const calls: unknown[][] = []
+  posthog.capture = ((...args: unknown[]) => {
+    calls.push(args)
+    return true
+  }) as typeof posthog.capture
+
+  try {
+    postHogDestination.track("pricing_viewed", {
+      availableIntervals: ["month", "quarter", "year"],
+      entryContext: "saved_result",
+      focusRoutine: false,
+      funnelEventId: "30000000-0000-4000-8000-000000000097",
+      leadId: "10000000-0000-4000-8000-000000000097",
+      needLane: "protein",
+      offerRevision: "product_led_v1",
+      offerVariant: "default",
+      offerViewId: "40000000-0000-4000-8000-000000000097",
+      pricingRevision: "pricing_v1",
+      selectedInterval: "quarter",
+      source: "quiz_result_offer_pricing",
+      suggestedCategory: "protein_mask",
+    })
+  } finally {
+    posthog.capture = originalCapture
+  }
+
+  assert.deepEqual(calls, [
+    [
+      "pricing_viewed",
+      {
+        $insert_id: "30000000-0000-4000-8000-000000000097",
+        available_intervals: ["month", "quarter", "year"],
+        entry_context: "saved_result",
+        focus_routine: false,
+        leadId: "10000000-0000-4000-8000-000000000097",
+        lead_id: "10000000-0000-4000-8000-000000000097",
+        need_lane: "protein",
+        offer_revision: "product_led_v1",
+        offer_variant: "default",
+        offer_view_id: "40000000-0000-4000-8000-000000000097",
+        pricing_revision: "pricing_v1",
+        selected_interval: "quarter",
+        source: "quiz_result_offer_pricing",
+        suggested_category: "protein_mask",
+      },
+    ],
+  ])
+})
+
+test("offer view payload only reuses a funnel event ID that was already persisted", () => {
+  const context = {
+    entryContext: "quiz_completion" as const,
+    focusRoutine: false,
+    funnelPackageKey: "default_organic",
+    funnelSessionId: "20000000-0000-4000-8000-000000000096",
+    leadId: "10000000-0000-4000-8000-000000000096",
+    needLane: "moisture",
+    offerRevision: "product_led_v1",
+    offerVariant: "default",
+    offerViewId: "40000000-0000-4000-8000-000000000096",
+  }
+
+  const inQuizPayload = buildOfferViewedPayload(context)
+  assert.equal("funnelEventId" in inQuizPayload, false)
+
+  const savedResultPayload = buildOfferViewedPayload(
+    context,
+    "30000000-0000-4000-8000-000000000096",
+  )
+  assert.equal(savedResultPayload.funnelEventId, "30000000-0000-4000-8000-000000000096")
+})
+
+test("offer view facade persists a new browser milestone but does not duplicate a server milestone", () => {
+  const originalFetch = globalThis.fetch
+  const requests: Array<{ body?: BodyInit | null; method?: string }> = []
+  globalThis.fetch = ((_input: string | URL | Request, init?: RequestInit) => {
+    requests.push({ body: init?.body, method: init?.method })
+    return Promise.resolve({ ok: true, json: async () => ({}) } as Response)
+  }) as typeof fetch
+
+  const context = {
+    entryContext: "quiz_completion" as const,
+    focusRoutine: false,
+    needLane: "moisture",
+    offerRevision: "product_led_v1",
+    offerVariant: "default",
+    offerViewId: "40000000-0000-4000-8000-000000000094",
+  }
+
+  try {
+    withDestinationSpies(() => {
+      trackAppEvent("offer_viewed", buildOfferViewedPayload(context))
+    })
+    assert.equal(requests.length, 1)
+    assert.equal(requests[0].method, "POST")
+    assert.equal(JSON.parse(String(requests[0].body)).milestone, "offer_viewed")
+
+    requests.length = 0
+    withDestinationSpies(() => {
+      trackAppEvent(
+        "offer_viewed",
+        buildOfferViewedPayload(context, "30000000-0000-4000-8000-000000000094"),
+      )
+    })
+    assert.equal(requests.length, 0)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test("PostHog checkout start keeps offer context and commerce metadata", () => {
+  const originalCapture = posthog.capture
+  const calls: unknown[][] = []
+  posthog.capture = ((...args: unknown[]) => {
+    calls.push(args)
+    return true
+  }) as typeof posthog.capture
+
+  try {
+    postHogDestination.track("checkout_started", {
+      checkoutAttemptId: "50000000-0000-4000-8000-000000000095",
+      currency: "EUR",
+      entryContext: "quiz_completion",
+      focusRoutine: false,
+      funnelEventId: "30000000-0000-4000-8000-000000000095",
+      funnelPackageKey: "default_organic",
+      funnelSessionId: "20000000-0000-4000-8000-000000000095",
+      interval: "year",
+      leadId: "10000000-0000-4000-8000-000000000095",
+      needLane: "moisture",
+      offerRevision: "product_led_v1",
+      offerVariant: "default",
+      offerViewId: "40000000-0000-4000-8000-000000000095",
+      planId: "premium_year",
+      provider: "stripe",
+      source: "quiz_result_offer",
+      value: 99.99,
+    })
+  } finally {
+    posthog.capture = originalCapture
+  }
+
+  assert.deepEqual(calls, [
+    [
+      "checkout_started",
+      {
+        $insert_id: "30000000-0000-4000-8000-000000000095",
+        checkout_attempt_id: "50000000-0000-4000-8000-000000000095",
+        currency: "EUR",
+        entry_context: "quiz_completion",
+        focus_routine: false,
+        funnel_package_key: "default_organic",
+        funnel_session_id: "20000000-0000-4000-8000-000000000095",
+        interval: "year",
+        leadId: "10000000-0000-4000-8000-000000000095",
+        lead_id: "10000000-0000-4000-8000-000000000095",
+        need_lane: "moisture",
+        offer_revision: "product_led_v1",
+        offer_variant: "default",
+        offer_view_id: "40000000-0000-4000-8000-000000000095",
+        plan_id: "premium_year",
+        provider: "stripe",
+        source: "quiz_result_offer",
+        value: 99.99,
+      },
+    ],
+  ])
+})
+
+test("profile reactivation context reaches PostHog and Customer.io", () => {
+  const postHogCalls: unknown[][] = []
+  const customerIoCalls: unknown[][] = []
+  const originalCapture = posthog.capture
+  posthog.capture = ((...args: unknown[]) => {
+    postHogCalls.push(args)
+    return true
+  }) as typeof posthog.capture
+  setCustomerIoBrowserClient({
+    identify: () => undefined,
+    page: () => undefined,
+    reset: () => undefined,
+    track: (...args: unknown[]) => customerIoCalls.push(args),
+  })
+
+  const payload = {
+    checkoutAttemptId: "50000000-0000-4000-8000-000000000096",
+    checkoutContext: "membership_reactivation" as const,
+    currency: "EUR",
+    funnelPackageKey: "membership_reactivation",
+    funnelSessionId: "20000000-0000-4000-8000-000000000096",
+    interval: "quarter" as const,
+    planId: "premium_quarter",
+    provider: "stripe" as const,
+    source: "pricing_page" as const,
+    value: 34.99,
+  }
+
+  try {
+    postHogDestination.track("checkout_started", payload)
+    customerIoDestination.track("checkout_started", payload)
+  } finally {
+    posthog.capture = originalCapture
+    clearCustomerIoBrowserClient()
+  }
+
+  assert.equal(
+    (postHogCalls[0]?.[1] as Record<string, unknown>)?.checkout_context,
+    "membership_reactivation",
+  )
+  assert.equal(
+    (customerIoCalls[0]?.[1] as Record<string, unknown>)?.checkout_context,
+    "membership_reactivation",
+  )
+})
+
 test("Customer.io adapter maps app payloads to snake_case vendor payloads", () => {
   const calls: unknown[][] = []
 
@@ -396,6 +767,61 @@ test("Meta adapter builds purchase payload from app-owned checkout fields", () =
   ])
 })
 
+test("Meta purchase initialization respects the local vendor analytics boundary", () => {
+  const previous = process.env.NEXT_PUBLIC_ENABLE_LOCAL_VENDOR_ANALYTICS
+
+  try {
+    delete process.env.NEXT_PUBLIC_ENABLE_LOCAL_VENDOR_ANALYTICS
+
+    for (const hostname of ["localhost", "127.0.0.1"]) {
+      const dom = createMetaDom(hostname)
+      withGlobalBrowser(dom.win, dom.doc, () => {
+        assert.equal(initMetaPixel(), false)
+        assert.equal(
+          metaDestination.track("purchase_completed", {
+            checkoutSessionId: `cs_local_${hostname}`,
+            currency: "eur",
+            interval: "month",
+            planId: "premium_month",
+            value: 14.99,
+          }),
+          false,
+        )
+      })
+
+      assert.equal(dom.insertedScripts.length, 0)
+      assert.equal(dom.win.fbq, undefined)
+    }
+
+    process.env.NEXT_PUBLIC_ENABLE_LOCAL_VENDOR_ANALYTICS = "true"
+    const allowedDom = createMetaDom("localhost")
+    withGlobalBrowser(allowedDom.win, allowedDom.doc, () => {
+      assert.equal(
+        metaDestination.track("purchase_completed", {
+          checkoutSessionId: "cs_local_override",
+          currency: "eur",
+          interval: "month",
+          planId: "premium_month",
+          value: 14.99,
+        }),
+        true,
+      )
+    })
+
+    assert.equal(allowedDom.insertedScripts.length, 1)
+    assert.deepEqual(
+      allowedDom.win.fbq?.queue?.map((call) => call.slice(0, 2)),
+      [
+        ["init", "988892550357504"],
+        ["track", "Purchase"],
+      ],
+    )
+  } finally {
+    if (previous === undefined) delete process.env.NEXT_PUBLIC_ENABLE_LOCAL_VENDOR_ANALYTICS
+    else process.env.NEXT_PUBLIC_ENABLE_LOCAL_VENDOR_ANALYTICS = previous
+  }
+})
+
 test("Meta purchase includes the package key behind the browser custom-data flag", () => {
   const previous = process.env.NEXT_PUBLIC_FUNNEL_META_CUSTOM_DATA_ENABLED
   const dom = createMetaDom()
@@ -459,6 +885,36 @@ test("Meta adapter gates package keys and never sends funnel session IDs", () =>
   assert.equal(disabledPayload.funnel_package_key, undefined)
   assert.equal(enabledPayload.funnel_package_key, "scalp_check_placeholder")
   assert.equal(JSON.stringify(calls).includes("20000000-0000-4000-8000-000000000002"), false)
+})
+
+test("Meta checkout-start payload includes structured commerce metadata", () => {
+  const dom = createMetaDom()
+
+  withGlobalBrowser(dom.win, dom.doc, () => {
+    initMetaPixel({ win: dom.win, doc: dom.doc })
+    assert.equal(
+      trackMetaCheckoutStarted(
+        "quiz_result_offer",
+        "quarter",
+        { currency: "EUR", planId: "premium_quarter", value: 34.99 },
+        "30000000-0000-4000-8000-000000000098",
+      ),
+      true,
+    )
+  })
+
+  assert.deepEqual(dom.win.fbq?.queue?.[1], [
+    "track",
+    "InitiateCheckout",
+    {
+      content_ids: ["premium_quarter"],
+      content_name: "quiz_result_offer",
+      currency: "EUR",
+      interval: "quarter",
+      value: 34.99,
+    },
+    { eventID: "30000000-0000-4000-8000-000000000098" },
+  ])
 })
 
 test("Meta preserves early quiz event order while waiting for the sticky funnel package", async () => {

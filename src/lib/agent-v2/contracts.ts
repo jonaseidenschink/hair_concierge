@@ -548,6 +548,21 @@ export const AgentV2TraceSchema = z.object({
   model_steps: z.array(AgentV2ModelStepTraceSchema),
   tool_calls: z.array(AgentV2ToolCallTraceSchema),
   turn_gate: AgentV2TurnGateTraceSchema.nullable().optional(),
+  tracker_context: z
+    .object({
+      load_status: z.enum(["available", "empty", "unavailable"]),
+      load_reason: z.enum([
+        "loaded",
+        "no_entries",
+        "missing_user",
+        "query_failed",
+        "unexpected_error",
+      ]),
+      logged_day_count: z.number().int().nonnegative(),
+      insight_count: z.number().int().nonnegative(),
+      load_ms: z.number().int().nonnegative(),
+    })
+    .optional(),
   blocked_tool_calls: z.array(
     z.object({
       name: z.string(),

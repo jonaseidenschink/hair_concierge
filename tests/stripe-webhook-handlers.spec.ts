@@ -38,7 +38,7 @@ function stubDeps() {
         },
       },
       from(table: string) {
-        const filters: Array<[string, string]> = []
+        const filters: Array<[string, string | string[]]> = []
         const tableApi = {
           select() {
             return this
@@ -48,9 +48,22 @@ function stubDeps() {
             filters.push([col, val])
             return this
           },
+          in(col: string, values: string[]) {
+            calls.push([`select-${table}-${col}-in`, values])
+            filters.push([col, values])
+            return this
+          },
+          order() {
+            return this
+          },
+          limit() {
+            return this
+          },
           async maybeSingle() {
             const row = rowsForTable().find((row: any) =>
-              filters.every(([col, val]) => row[col] === val),
+              filters.every(([col, val]) =>
+                Array.isArray(val) ? val.includes(row[col]) : row[col] === val,
+              ),
             )
             return { data: row ?? null, error: null }
           },
@@ -118,6 +131,7 @@ function stubDeps() {
         function rowsForTable() {
           if (table === "profiles") return Object.values(profiles)
           if (table === "billing_subscriptions") return billing
+          if (table === "billing_subscription_plan_changes") return []
           return Object.values(users)
         }
         return tableApi

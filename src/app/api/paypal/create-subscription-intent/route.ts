@@ -5,11 +5,14 @@ import { createClient } from "@/lib/supabase/server"
 import { assertCanStartCheckout, assertCanStartCheckoutForEmail } from "@/lib/billing/subscriptions"
 import { captureCheckoutException } from "@/lib/observability/checkout"
 import {
+  createOrAdoptPayPalReactivationCheckoutIntent,
   createPayPalCheckoutIntent,
+  findPayPalCheckoutIntentByReactivationReservationId,
   type PayPalCheckoutSource,
 } from "@/lib/paypal/checkout-intents"
 import type { BillingInterval } from "@/lib/billing/types"
 import { getPayPalPlanId } from "@/lib/paypal/plans"
+import { getStripePricingPlan } from "@/lib/stripe/pricing-plans"
 import { cookies } from "next/headers"
 import { FUNNEL_SESSION_COOKIE, FUNNEL_TOUCH_COOKIE } from "@/lib/funnel/cookie"
 import {
@@ -18,6 +21,14 @@ import {
   resolveFunnelContextForLead,
   resolvePendingFunnelTouchValue,
 } from "@/lib/funnel/server"
+import {
+  acquireMembershipReactivationCheckout,
+  bindMembershipReactivationProviderReference,
+  claimMembershipReactivationProvider,
+  MembershipReactivationCheckoutConflictError,
+  type MembershipReactivationCheckoutReservation,
+} from "@/lib/reactivation/checkout-reservations"
+import { sanitizeReactivationReturnDestination } from "@/lib/reactivation/return-destination"
 
 export const runtime = "nodejs"
 
@@ -26,6 +37,9 @@ const BodySchema = z.object({
   leadId: z.string().uuid().nullable().optional(),
   source: z.enum(["pricing_page", "quiz_result_offer"]),
   funnelEventId: z.string().uuid().optional(),
+  checkoutAttemptId: z.string().uuid().optional(),
+  checkoutContext: z.literal("membership_reactivation").optional(),
+  returnDestination: z.string().max(500).optional(),
 })
 
 const ACCESS_CONFLICT_ERROR = "checkout_access_already_exists"
@@ -40,7 +54,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "bad request" }, { status: 400 })
   }
 
-  const { interval, leadId, source, funnelEventId } = parsed.data
+  const {
+    interval,
+    leadId,
+    source,
+    funnelEventId,
+    checkoutAttemptId,
+    checkoutContext,
+    returnDestination: rawReturnDestination,
+  } = parsed.data
+  const analyticsPlan = getStripePricingPlan(interval)
   let planId: string
   try {
     planId = getPayPalPlanId(interval)
@@ -63,6 +86,15 @@ export async function POST(request: Request) {
     const {
       data: { user },
     } = await supabase.auth.getUser()
+
+    if (
+      checkoutContext === "membership_reactivation" &&
+      (!user?.id || !checkoutAttemptId || leadId)
+    ) {
+      return NextResponse.json({ error: "authenticated reactivation required" }, { status: 401 })
+    }
+
+    let reactivationReservation: MembershipReactivationCheckoutReservation | null = null
 
     if (user?.id) {
       const conflict = await toConflictResponse(assertCanStartCheckout(admin, user.id), user.email)
@@ -94,6 +126,41 @@ export async function POST(request: Request) {
       if (conflict) return conflict
     }
 
+    if (checkoutContext === "membership_reactivation" && user?.id && checkoutAttemptId) {
+      try {
+        reactivationReservation = await acquireMembershipReactivationCheckout(admin, {
+          userId: user.id,
+          checkoutAttemptId,
+          interval: interval as BillingInterval,
+          returnDestination: sanitizeReactivationReturnDestination(rawReturnDestination),
+        })
+        reactivationReservation = await claimMembershipReactivationProvider(
+          admin,
+          reactivationReservation.id,
+          user.id,
+          "paypal",
+        )
+      } catch (error) {
+        if (error instanceof MembershipReactivationCheckoutConflictError) {
+          return NextResponse.json({ error: "reactivation_checkout_in_progress" }, { status: 409 })
+        }
+        throw error
+      }
+
+      const existingIntent = await findPayPalCheckoutIntentByReactivationReservationId(
+        admin,
+        reactivationReservation.id,
+      )
+      if (existingIntent && !["expired", "duplicate"].includes(existingIntent.status)) {
+        await bindMembershipReactivationProviderReference(
+          admin,
+          reactivationReservation.id,
+          existingIntent.id,
+        )
+        return NextResponse.json({ token: existingIntent.token, planId })
+      }
+    }
+
     const cookieStore = await cookies()
     const funnelContext =
       (await resolveFunnelCookieContext(cookieStore.get(FUNNEL_SESSION_COOKIE)?.value)) ??
@@ -104,19 +171,44 @@ export async function POST(request: Request) {
           funnelContext,
         )
       : null
-    const intent = await createPayPalCheckoutIntent(admin, {
+    const intentInput = {
       interval: interval as BillingInterval,
       source: source as PayPalCheckoutSource,
       leadId: resolvedLeadId,
       email,
       userId: user?.id ?? null,
-      metadata: funnelContext
-        ? {
-            funnel_session_id: funnelContext.sessionId,
-            funnel_package_key: funnelContext.packageKey,
-          }
-        : {},
-    })
+      metadata: {
+        ...(funnelContext
+          ? {
+              funnel_session_id: funnelContext.sessionId,
+              funnel_package_key: funnelContext.packageKey,
+            }
+          : {}),
+        ...(checkoutContext ? { checkout_context: checkoutContext } : {}),
+        ...(reactivationReservation
+          ? {
+              return_destination: reactivationReservation.return_destination,
+              reactivation_reservation_id: reactivationReservation.id,
+            }
+          : {}),
+      },
+    }
+    const intent = reactivationReservation
+      ? await createOrAdoptPayPalReactivationCheckoutIntent(admin, {
+          ...intentInput,
+          reactivationReservationId: reactivationReservation.id,
+        })
+      : await createPayPalCheckoutIntent(admin, intentInput)
+    if (reactivationReservation) {
+      if (["expired", "duplicate"].includes(intent.status)) {
+        return NextResponse.json({ error: "reactivation_checkout_in_progress" }, { status: 409 })
+      }
+      await bindMembershipReactivationProviderReference(
+        admin,
+        reactivationReservation.id,
+        intent.id,
+      )
+    }
 
     const funnelRecorded = funnelContext
       ? await recordFunnelEvent({
@@ -128,7 +220,15 @@ export async function POST(request: Request) {
           checkoutProvider: "paypal",
           checkoutReference: intent.token,
           touch: funnelTouch,
-          properties: { source, interval },
+          properties: {
+            source,
+            interval,
+            ...(checkoutAttemptId ? { checkout_attempt_id: checkoutAttemptId } : {}),
+            ...(checkoutContext ? { checkout_context: checkoutContext } : {}),
+            currency: analyticsPlan.currency,
+            plan_id: analyticsPlan.analyticsId,
+            value: analyticsPlan.amount,
+          },
         })
           .then(() => true)
           .catch((error) => {

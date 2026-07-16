@@ -8,6 +8,9 @@ type BuildStripeCheckoutSessionParamsInput = {
   leadId?: string | null
   funnelSessionId?: string | null
   funnelPackageKey?: string | null
+  checkoutContext?: "membership_reactivation" | null
+  returnDestination?: string | null
+  reactivationReservationId?: string | null
 }
 
 export function buildStripeCheckoutSessionParams({
@@ -18,6 +21,9 @@ export function buildStripeCheckoutSessionParams({
   leadId,
   funnelSessionId,
   funnelPackageKey,
+  checkoutContext,
+  returnDestination,
+  reactivationReservationId,
 }: BuildStripeCheckoutSessionParamsInput): Stripe.Checkout.SessionCreateParams {
   return {
     mode: "subscription",
@@ -36,11 +42,21 @@ export function buildStripeCheckoutSessionParams({
     },
     excluded_payment_method_types: ["sepa_debit"],
     metadata:
-      leadId || funnelSessionId || funnelPackageKey
+      leadId ||
+      funnelSessionId ||
+      funnelPackageKey ||
+      checkoutContext ||
+      returnDestination ||
+      reactivationReservationId
         ? {
             ...(leadId ? { lead_id: leadId } : {}),
             ...(funnelSessionId ? { funnel_session_id: funnelSessionId } : {}),
             ...(funnelPackageKey ? { funnel_package_key: funnelPackageKey } : {}),
+            ...(checkoutContext ? { checkout_context: checkoutContext } : {}),
+            ...(returnDestination ? { return_destination: returnDestination } : {}),
+            ...(reactivationReservationId
+              ? { reactivation_reservation_id: reactivationReservationId }
+              : {}),
           }
         : undefined,
   }

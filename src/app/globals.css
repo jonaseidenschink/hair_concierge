@@ -31,7 +31,8 @@
   --radius-lg: 14px;
   --radius-xl: calc(var(--radius) + 4px);
   --radius-pill: 24px;
-  --font-mono: var(--font-ibm-plex-mono), ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --font-mono:
+    var(--font-ibm-plex-mono), ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   --font-display: var(--font-playfair-display), Georgia, "Times New Roman", serif;
   --font-body: var(--font-plus-jakarta-sans), Arial, Helvetica, sans-serif;
   --space-xs: 4px;
@@ -75,39 +76,60 @@
   --sidebar-ring: 262 34% 47%;
 
   /* Brand color tokens */
-  --brand-plum-darkest: #2A1845;
-  --brand-plum-dark: #3D2A62;
-  --brand-plum: #6B50A0;
-  --brand-plum-light: #C8B8E0;
-  --brand-plum-ice: #F2EEFA;
+  --brand-plum-darkest: #2a1845;
+  --brand-plum-dark: #3d2a62;
+  --brand-plum: #6b50a0;
+  --brand-plum-light: #c8b8e0;
+  --brand-plum-ice: #f2eefa;
   --brand-plum-rgb: 107, 80, 160;
   --brand-plum-light-rgb: 200, 184, 224;
-  --brand-coral: #D4616A;
-  --brand-coral-dark: #C0555D;
-  --brand-coral-deep: #AA464E;
-  --brand-coral-deeper: #9F3D45;
-  --brand-coral-light: #FDEEF0;
+  --brand-coral: #d4616a;
+  --brand-coral-dark: #c0555d;
+  --brand-coral-deep: #aa464e;
+  --brand-coral-deeper: #9f3d45;
+  --brand-coral-light: #fdeef0;
   --brand-coral-rgb: 212, 97, 106;
   --landing-sticky-cta-clearance: calc(84px + env(safe-area-inset-bottom));
 
   /* Text tokens */
-  --text-heading: #2A1845;
-  --text-body: #3A3835;
-  --text-sub: #6A6560;
-  --text-caption: #736F69;
+  --text-heading: #2a1845;
+  --text-body: #3a3835;
+  --text-sub: #6a6560;
+  --text-caption: #736f69;
 
   /* Typography scale — mobile-first */
-  --type-display: 28px;   --type-display-lh: 1.2;   --type-display-weight: 500;
-  --type-h1: 24px;        --type-h1-lh: 1.25;       --type-h1-weight: 500;
-  --type-h2: 20px;        --type-h2-lh: 1.3;        --type-h2-weight: 700;
-  --type-h3: 17px;        --type-h3-lh: 1.35;       --type-h3-weight: 600;
-  --type-body: 16px;      --type-body-lh: 1.6;      --type-body-weight: 400;
-  --type-body-sm: 14px;   --type-body-sm-lh: 1.55;  --type-body-sm-weight: 400;
-  --type-button: 14px;    --type-button-weight: 600;
-  --type-numbers: 18px;   --type-numbers-lh: 1.2;   --type-numbers-weight: 700;
-  --type-caption: 12px;   --type-caption-lh: 1.4;   --type-caption-weight: 400;
-  --type-label: 10px;     --type-label-lh: 1.3;     --type-label-weight: 500;
-  --type-overline: 9px;   --type-overline-lh: 1.3;  --type-overline-weight: 500;
+  --type-display: 28px;
+  --type-display-lh: 1.2;
+  --type-display-weight: 500;
+  --type-h1: 24px;
+  --type-h1-lh: 1.25;
+  --type-h1-weight: 500;
+  --type-h2: 20px;
+  --type-h2-lh: 1.3;
+  --type-h2-weight: 700;
+  --type-h3: 17px;
+  --type-h3-lh: 1.35;
+  --type-h3-weight: 600;
+  --type-body: 16px;
+  --type-body-lh: 1.6;
+  --type-body-weight: 400;
+  --type-body-sm: 14px;
+  --type-body-sm-lh: 1.55;
+  --type-body-sm-weight: 400;
+  --type-button: 14px;
+  --type-button-weight: 600;
+  --type-numbers: 18px;
+  --type-numbers-lh: 1.2;
+  --type-numbers-weight: 700;
+  --type-caption: 12px;
+  --type-caption-lh: 1.4;
+  --type-caption-weight: 400;
+  --type-label: 10px;
+  --type-label-lh: 1.3;
+  --type-label-weight: 500;
+  --type-overline: 9px;
+  --type-overline-lh: 1.3;
+  --type-overline-weight: 500;
 }
 
 @media (min-width: 768px) {
@@ -153,7 +175,8 @@
     @apply bg-background text-foreground;
     --font-display: var(--font-playfair-display), Georgia, "Times New Roman", serif;
     --font-body: var(--font-plus-jakarta-sans), Arial, Helvetica, sans-serif;
-    --font-mono: var(--font-ibm-plex-mono), ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --font-mono:
+      var(--font-ibm-plex-mono), ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
     font-family: var(--font-body);
   }
 }
@@ -169,17 +192,73 @@
 
 /* Typography utility classes */
 @layer components {
-  .type-display { font-family: var(--font-display); font-size: var(--type-display); line-height: var(--type-display-lh); font-weight: var(--type-display-weight); }
-  .type-h1 { font-family: var(--font-display); font-size: var(--type-h1); line-height: var(--type-h1-lh); font-weight: var(--type-h1-weight); }
-  .type-h2 { font-family: var(--font-body); font-size: var(--type-h2); line-height: var(--type-h2-lh); font-weight: var(--type-h2-weight); }
-  .type-h3 { font-family: var(--font-body); font-size: var(--type-h3); line-height: var(--type-h3-lh); font-weight: var(--type-h3-weight); }
-  .type-label { font-family: var(--font-mono); font-size: var(--type-label); line-height: var(--type-label-lh); font-weight: var(--type-label-weight); text-transform: uppercase; }
-  .type-overline { font-family: var(--font-mono); font-size: var(--type-overline); line-height: var(--type-overline-lh); font-weight: var(--type-overline-weight); text-transform: uppercase; }
-  .type-body { font-family: var(--font-body); font-size: var(--type-body); line-height: var(--type-body-lh); font-weight: var(--type-body-weight); }
-  .type-body-sm { font-family: var(--font-body); font-size: var(--type-body-sm); line-height: var(--type-body-sm-lh); font-weight: var(--type-body-sm-weight); }
-  .type-button { font-family: var(--font-body); font-size: var(--type-button); font-weight: var(--type-button-weight); }
-  .type-numbers { font-family: var(--font-body); font-size: var(--type-numbers); line-height: var(--type-numbers-lh); font-weight: var(--type-numbers-weight); }
-  .type-caption { font-family: var(--font-body); font-size: var(--type-caption); line-height: var(--type-caption-lh); font-weight: var(--type-caption-weight); }
+  .type-display {
+    font-family: var(--font-display);
+    font-size: var(--type-display);
+    line-height: var(--type-display-lh);
+    font-weight: var(--type-display-weight);
+  }
+  .type-h1 {
+    font-family: var(--font-display);
+    font-size: var(--type-h1);
+    line-height: var(--type-h1-lh);
+    font-weight: var(--type-h1-weight);
+  }
+  .type-h2 {
+    font-family: var(--font-body);
+    font-size: var(--type-h2);
+    line-height: var(--type-h2-lh);
+    font-weight: var(--type-h2-weight);
+  }
+  .type-h3 {
+    font-family: var(--font-body);
+    font-size: var(--type-h3);
+    line-height: var(--type-h3-lh);
+    font-weight: var(--type-h3-weight);
+  }
+  .type-label {
+    font-family: var(--font-mono);
+    font-size: var(--type-label);
+    line-height: var(--type-label-lh);
+    font-weight: var(--type-label-weight);
+    text-transform: uppercase;
+  }
+  .type-overline {
+    font-family: var(--font-mono);
+    font-size: var(--type-overline);
+    line-height: var(--type-overline-lh);
+    font-weight: var(--type-overline-weight);
+    text-transform: uppercase;
+  }
+  .type-body {
+    font-family: var(--font-body);
+    font-size: var(--type-body);
+    line-height: var(--type-body-lh);
+    font-weight: var(--type-body-weight);
+  }
+  .type-body-sm {
+    font-family: var(--font-body);
+    font-size: var(--type-body-sm);
+    line-height: var(--type-body-sm-lh);
+    font-weight: var(--type-body-sm-weight);
+  }
+  .type-button {
+    font-family: var(--font-body);
+    font-size: var(--type-button);
+    font-weight: var(--type-button-weight);
+  }
+  .type-numbers {
+    font-family: var(--font-body);
+    font-size: var(--type-numbers);
+    line-height: var(--type-numbers-lh);
+    font-weight: var(--type-numbers-weight);
+  }
+  .type-caption {
+    font-family: var(--font-body);
+    font-size: var(--type-caption);
+    line-height: var(--type-caption-lh);
+    font-weight: var(--type-caption-weight);
+  }
 }
 
 /* Quiz component styles — wrapped in @layer so Tailwind v4 preserves them */
@@ -217,7 +296,9 @@
     color: hsl(var(--primary-foreground));
     font-family: var(--font-body), Arial, Helvetica, sans-serif;
     border-radius: var(--radius-md);
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    transition:
+      transform 0.2s ease,
+      box-shadow 0.2s ease;
   }
 
   .quiz-btn-primary:hover {
@@ -271,34 +352,173 @@
 
 /* Bottom sheet animations */
 @keyframes bottomSheetUp {
-  from { transform: translateY(100%); }
-  to { transform: translateY(0); }
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
 }
 
 @keyframes bottomSheetDown {
-  from { transform: translateY(0); }
-  to { transform: translateY(100%); }
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(100%);
+  }
 }
 
 @keyframes backdropFadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 @keyframes backdropFadeOut {
-  from { opacity: 1; }
-  to { opacity: 0; }
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes bottomSheetFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes bottomSheetFadeOut {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+.bottom-sheet-root {
+  --bottom-sheet-enter-duration: 350ms;
+  --bottom-sheet-exit-duration: 250ms;
+  --bottom-sheet-backdrop-enter-duration: 350ms;
+  --bottom-sheet-backdrop-exit-duration: 250ms;
+  --bottom-sheet-enter-easing: cubic-bezier(0.32, 0.72, 0, 1);
+  --bottom-sheet-exit-easing: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.tracker-bottom-sheet-motion {
+  --bottom-sheet-enter-duration: 300ms;
+  --bottom-sheet-exit-duration: 200ms;
+  --bottom-sheet-backdrop-enter-duration: 180ms;
+  --bottom-sheet-backdrop-exit-duration: 160ms;
+  --bottom-sheet-enter-easing: cubic-bezier(0.16, 1, 0.3, 1);
+  --bottom-sheet-exit-easing: cubic-bezier(0.4, 0, 1, 1);
+}
+
+@keyframes trackerDayContentIn {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes trackerStatusIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.tracker-day-content {
+  animation: trackerDayContentIn 140ms ease-out both;
+}
+
+.tracker-day-tab,
+.tracker-activity-tile,
+.tracker-product-row {
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease,
+    transform 120ms ease;
+}
+
+.tracker-day-tab:active,
+.tracker-activity-tile:active,
+.tracker-product-row:active {
+  transform: scale(0.985);
+}
+
+.tracker-save-status:not(:empty) {
+  animation: trackerStatusIn 160ms ease-out both;
+}
+
+.tracker-rhythm-progress {
+  transition:
+    transform 450ms ease-out,
+    background-color 140ms ease;
+}
+
+.bottom-sheet-backdrop[data-state="open"] {
+  animation: backdropFadeIn var(--bottom-sheet-backdrop-enter-duration)
+    var(--bottom-sheet-enter-easing) forwards;
+}
+
+.bottom-sheet-backdrop[data-state="closed"] {
+  animation: backdropFadeOut var(--bottom-sheet-backdrop-exit-duration)
+    var(--bottom-sheet-exit-easing) forwards;
+}
+
+.bottom-sheet-panel {
+  transition: transform 200ms var(--bottom-sheet-enter-easing);
+}
+
+.bottom-sheet-panel[data-state="open"] {
+  animation: bottomSheetUp var(--bottom-sheet-enter-duration) var(--bottom-sheet-enter-easing)
+    forwards;
+}
+
+.bottom-sheet-panel[data-state="closed"] {
+  animation: bottomSheetDown var(--bottom-sheet-exit-duration) var(--bottom-sheet-exit-easing)
+    forwards;
+}
+
+.bottom-sheet-panel[data-dragging="true"] {
+  animation: none;
+  transition: none;
 }
 
 /* Sidebar slide animations */
 @keyframes slideInLeft {
-  from { transform: translateX(-100%); }
-  to { transform: translateX(0); }
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
 }
 
 @keyframes slideOutLeft {
-  from { transform: translateX(0); }
-  to { transform: translateX(-100%); }
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-100%);
+  }
 }
 
 .animate-slide-in-left {
@@ -311,8 +531,13 @@
 
 /* Comb sway animation for loading indicator */
 @keyframes combSway {
-  0%, 100% { transform: rotate(-15deg); }
-  50% { transform: rotate(15deg); }
+  0%,
+  100% {
+    transform: rotate(-15deg);
+  }
+  50% {
+    transform: rotate(15deg);
+  }
 }
 
 .animate-comb-sway {
@@ -322,7 +547,8 @@
 
 /* Feedback side-tab attention pulse — fires while the first-time hint is up */
 @keyframes feedbackPulse {
-  0%, 100% {
+  0%,
+  100% {
     box-shadow: -6px 0 16px -6px rgba(217, 106, 118, 0.45);
   }
   50% {
@@ -382,7 +608,8 @@
 }
 
 @keyframes loadingEllipsisPulse {
-  0%, 100% {
+  0%,
+  100% {
     opacity: 0.45;
     transform: translateY(0);
   }
@@ -442,6 +669,40 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .bottom-sheet-backdrop[data-state="open"],
+  .bottom-sheet-panel[data-state="open"] {
+    animation-duration: 1ms;
+    animation-name: bottomSheetFadeIn;
+  }
+
+  .bottom-sheet-backdrop[data-state="closed"],
+  .bottom-sheet-panel[data-state="closed"] {
+    animation-duration: 1ms;
+    animation-name: bottomSheetFadeOut;
+  }
+
+  .bottom-sheet-panel {
+    transition: none;
+  }
+
+  .tracker-day-content,
+  .tracker-save-status:not(:empty) {
+    animation: none;
+  }
+
+  .tracker-day-tab,
+  .tracker-activity-tile,
+  .tracker-product-row,
+  .tracker-rhythm-progress {
+    transition: none;
+  }
+
+  .tracker-day-tab:active,
+  .tracker-activity-tile:active,
+  .tracker-product-row:active {
+    transform: none;
+  }
+
   .animate-fade-in-up,
   .animate-fade-in-up-fast,
   .animate-scale-in,

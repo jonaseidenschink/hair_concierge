@@ -15,6 +15,17 @@ import {
 import { getStripe, PRICE_IDS } from "@/lib/stripe/client"
 import { buildStripeCheckoutSessionParams } from "@/lib/stripe/checkout-session-params"
 import type { BillingInterval } from "@/lib/stripe/intervals"
+import { getStripePricingPlan } from "@/lib/stripe/pricing-plans"
+import {
+  acquireMembershipReactivationCheckout,
+  bindMembershipReactivationProviderReference,
+  claimMembershipReactivationProvider,
+  expireMembershipReactivationCheckoutReservation,
+  markMembershipReactivationReconciliationRequired,
+  MembershipReactivationCheckoutConflictError,
+  type MembershipReactivationCheckoutReservation,
+} from "@/lib/reactivation/checkout-reservations"
+import { sanitizeReactivationReturnDestination } from "@/lib/reactivation/return-destination"
 
 export const runtime = "nodejs"
 
@@ -25,6 +36,9 @@ const BodySchema = z.object({
   leadId: z.string().uuid().nullable().optional(),
   source: z.enum(["pricing_page", "quiz_result_offer"]).default("pricing_page"),
   funnelEventId: z.string().uuid().optional(),
+  checkoutAttemptId: z.string().uuid().optional(),
+  checkoutContext: z.literal("membership_reactivation").optional(),
+  returnDestination: z.string().max(500).optional(),
 })
 
 export async function POST(req: NextRequest) {
@@ -32,7 +46,16 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) {
     return NextResponse.json({ error: "bad request" }, { status: 400 })
   }
-  const { interval, leadId, source, funnelEventId } = parsed.data
+  const {
+    interval,
+    leadId,
+    source,
+    funnelEventId,
+    checkoutAttemptId,
+    checkoutContext,
+    returnDestination: rawReturnDestination,
+  } = parsed.data
+  const analyticsPlan = getStripePricingPlan(interval)
 
   const priceId = PRICE_IDS[interval as BillingInterval]
   if (!priceId) {
@@ -75,6 +98,13 @@ export async function POST(req: NextRequest) {
       adminSupabase ??= createBillingAdminClient()
       return adminSupabase
     }
+    let reactivationReservation: MembershipReactivationCheckoutReservation | null = null
+
+    if (checkoutContext === "membership_reactivation") {
+      if (!authenticatedUserId || !checkoutAttemptId || leadId) {
+        return NextResponse.json({ error: "authenticated reactivation required" }, { status: 401 })
+      }
+    }
 
     if (authenticatedUserId) {
       const adminSupabase = getAdminSupabase()
@@ -90,6 +120,32 @@ export async function POST(req: NextRequest) {
           user.email,
         )
         if (emailConflictResponse) return emailConflictResponse
+      }
+
+      if (checkoutContext === "membership_reactivation" && checkoutAttemptId) {
+        const returnDestination = sanitizeReactivationReturnDestination(rawReturnDestination)
+        try {
+          reactivationReservation = await acquireMembershipReactivationCheckout(adminSupabase, {
+            userId: authenticatedUserId,
+            checkoutAttemptId,
+            interval: interval as BillingInterval,
+            returnDestination,
+          })
+          reactivationReservation = await claimMembershipReactivationProvider(
+            adminSupabase,
+            reactivationReservation.id,
+            authenticatedUserId,
+            "stripe",
+          )
+        } catch (error) {
+          if (error instanceof MembershipReactivationCheckoutConflictError) {
+            return NextResponse.json(
+              { error: "reactivation_checkout_in_progress" },
+              { status: 409 },
+            )
+          }
+          throw error
+        }
       }
     }
 
@@ -149,6 +205,44 @@ export async function POST(req: NextRequest) {
 
     const origin = req.nextUrl.origin
     const stripe = getStripe()
+
+    if (reactivationReservation?.provider_reference) {
+      const providerReference = reactivationReservation.provider_reference
+      try {
+        const existingSession = await stripe.checkout.sessions.retrieve(providerReference)
+        if (existingSession.status === "expired") {
+          await expireMembershipReactivationCheckoutReservation(getAdminSupabase(), {
+            reservationId: reactivationReservation.id,
+            userId: authenticatedUserId!,
+            providerReference,
+          })
+          return NextResponse.json({ error: "reactivation_checkout_terminal" }, { status: 409 })
+        }
+        if (!existingSession.client_secret) throw new Error("existing session has no client secret")
+        return NextResponse.json({ client_secret: existingSession.client_secret })
+      } catch (error) {
+        if (isDefinitivelyMissingStripeResource(error)) {
+          await expireMembershipReactivationCheckoutReservation(getAdminSupabase(), {
+            reservationId: reactivationReservation.id,
+            userId: authenticatedUserId!,
+            providerReference,
+          })
+          return NextResponse.json({ error: "reactivation_checkout_terminal" }, { status: 409 })
+        }
+        await markMembershipReactivationReconciliationRequired(
+          getAdminSupabase(),
+          reactivationReservation.id,
+        ).catch(() => {})
+        captureCheckoutException(error, {
+          provider: "stripe",
+          stage: "stripe_checkout_session_create",
+          source,
+          interval,
+          reason: "reactivation_session_reconciliation_required",
+        })
+        return NextResponse.json({ error: "reactivation_checkout_unavailable" }, { status: 409 })
+      }
+    }
     const funnelContext =
       (await resolveFunnelCookieContext(cookieStore.get(FUNNEL_SESSION_COOKIE)?.value)) ??
       (await resolveFunnelContextForLead(resolvedLeadId))
@@ -167,8 +261,23 @@ export async function POST(req: NextRequest) {
       leadId: resolvedLeadId,
       funnelSessionId: funnelContext?.sessionId,
       funnelPackageKey: funnelContext?.packageKey,
+      checkoutContext,
+      returnDestination: reactivationReservation?.return_destination,
+      reactivationReservationId: reactivationReservation?.id,
     })
-    const session = await stripe.checkout.sessions.create(params)
+    const session = await stripe.checkout.sessions.create(
+      params,
+      reactivationReservation
+        ? { idempotencyKey: `membership-reactivation:${reactivationReservation.id}` }
+        : undefined,
+    )
+    if (reactivationReservation) {
+      await bindMembershipReactivationProviderReference(
+        getAdminSupabase(),
+        reactivationReservation.id,
+        session.id,
+      )
+    }
 
     const funnelRecorded = funnelContext
       ? await recordFunnelEvent({
@@ -180,7 +289,15 @@ export async function POST(req: NextRequest) {
           checkoutProvider: "stripe",
           checkoutReference: session.id,
           touch: funnelTouch,
-          properties: { source, interval },
+          properties: {
+            source,
+            interval,
+            ...(checkoutAttemptId ? { checkout_attempt_id: checkoutAttemptId } : {}),
+            ...(checkoutContext ? { checkout_context: checkoutContext } : {}),
+            currency: analyticsPlan.currency,
+            plan_id: analyticsPlan.analyticsId,
+            value: analyticsPlan.amount,
+          },
         })
           .then(() => true)
           .catch((error) => {
@@ -204,6 +321,12 @@ export async function POST(req: NextRequest) {
     })
     throw error
   }
+}
+
+function isDefinitivelyMissingStripeResource(error: unknown) {
+  if (!error || typeof error !== "object") return false
+  const candidate = error as { code?: unknown; statusCode?: unknown }
+  return candidate.code === "resource_missing" || candidate.statusCode === 404
 }
 
 export async function createStripeCheckoutEmailAccessConflictResponse(

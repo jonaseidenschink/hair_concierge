@@ -8,6 +8,17 @@ type OAuthTokenResponse = {
 
 let cachedToken: { token: string; expiresAt: number } | null = null
 
+export class PayPalRequestError extends Error {
+  constructor(
+    message: string,
+    readonly status: number | null,
+    options?: { cause?: unknown },
+  ) {
+    super(message, options)
+    this.name = "PayPalRequestError"
+  }
+}
+
 export function getPayPalBaseUrl(): string {
   const environment = process.env.PAYPAL_ENVIRONMENT?.toLowerCase()
   if (!environment) throw new Error("PAYPAL_ENVIRONMENT is not set")
@@ -18,19 +29,27 @@ export function getPayPalBaseUrl(): string {
 
 export async function paypalRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = await getPayPalAccessToken()
-  const response = await fetch(`${getPayPalBaseUrl()}${path}`, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      Accept: "application/json",
-      ...init.headers,
-    },
-  })
+  let response: Response
+  try {
+    response = await fetch(`${getPayPalBaseUrl()}${path}`, {
+      ...init,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        ...init.headers,
+      },
+    })
+  } catch (error) {
+    throw new PayPalRequestError("PayPal request failed before a response was received", null, {
+      cause: error,
+    })
+  }
 
   if (!response.ok) {
-    throw new Error(
+    throw new PayPalRequestError(
       `PayPal request failed (${response.status} ${response.statusText}): ${await readBody(response)}`,
+      response.status,
     )
   }
 

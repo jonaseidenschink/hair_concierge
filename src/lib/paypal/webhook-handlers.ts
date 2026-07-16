@@ -4,6 +4,7 @@ import {
   billingSubscriptionPayload,
 } from "@/lib/billing/analytics-events"
 import { recordBillingAnalyticsEvent } from "@/lib/billing/analytics-outbox"
+import { applyPlanChangeAtRenewal } from "@/lib/billing/plan-change"
 import { mirrorBillingSubscriptionToProfile } from "@/lib/billing/entitlements"
 import {
   findBillingSubscriptionByProviderId,
@@ -22,6 +23,7 @@ import {
   findPayPalCheckoutIntentByToken,
   isPayPalCheckoutIntentExpired,
   markPayPalCheckoutIntentActivated,
+  markPayPalCheckoutIntentDuplicate,
   markPayPalCheckoutIntentExpired,
   PayPalCheckoutIntentBindingError,
 } from "@/lib/paypal/checkout-intents"
@@ -136,7 +138,26 @@ export async function handlePayPalWebhookEvent(
     switch (eventType) {
       case "BILLING.SUBSCRIPTION.ACTIVATED":
       case "PAYMENT.SALE.COMPLETED": {
-        const outcome = await activateOrRefreshSubscription(subscription, deps)
+        let outcome = await activateOrRefreshSubscription(subscription, deps)
+        if (eventType === "PAYMENT.SALE.COMPLETED" && outcome.kind === "active") {
+          const providerInterval = getPayPalIntervalForPlanId(subscription.plan_id)
+          if (providerInterval) {
+            const applied = await applyPlanChangeAtRenewal(deps.supabase, {
+              subscription: outcome.billingRow,
+              observedInterval: providerInterval,
+              occurredAt: event.create_time ?? new Date().toISOString(),
+            })
+            if (applied) {
+              await mirrorBillingSubscriptionToProfile(
+                deps.supabase,
+                applied.subscription,
+                deps.premiumTierId,
+                { freeTierId: deps.freeTierId },
+              )
+              outcome = { ...outcome, billingRow: applied.subscription }
+            }
+          }
+        }
         if (deps.recordBillingAnalytics) {
           await recordPayPalSuccessfulPayment(event, deps, outcome, eventType)
         }
@@ -201,7 +222,16 @@ async function activateOrRefreshSubscription(
     subscription.id,
   )
 
-  if (intent?.status === "duplicate") return { kind: "none" }
+  if (intent?.status === "duplicate") {
+    await cancelAndMarkPayPalDuplicate({
+      cancelPayPalSubscription: deps.cancelPayPalSubscription ?? cancelPayPalSubscriptionForWebhook,
+      reason: intent.duplicate_reason ?? "reactivation_reservation_race",
+      subscriptionId: subscription.id,
+      supabase: deps.supabase,
+      token: intent.token,
+    })
+    return { kind: "none" }
+  }
   if (!existing && !intent) {
     throw new Error(`PayPal subscription ${subscription.id} has no checkout intent or local row`)
   }
@@ -306,11 +336,24 @@ async function updateExistingSubscription(
     subscription.id,
   )
   if (!existing) {
-    const intent = await findPayPalCheckoutIntentByProviderSubscriptionId(
+    const intentByProvider = await findPayPalCheckoutIntentByProviderSubscriptionId(
       deps.supabase,
       subscription.id,
     )
-    if (intent?.status === "duplicate") return null
+    const intent =
+      intentByProvider ??
+      (subscription.custom_id?.trim()
+        ? await findPayPalCheckoutIntentByToken(deps.supabase, subscription.custom_id.trim())
+        : null)
+    if (intent?.status === "duplicate") {
+      await markPayPalCheckoutIntentDuplicate(
+        deps.supabase,
+        intent.token,
+        intent.duplicate_reason ?? "reactivation_reservation_race",
+        subscription.id,
+      )
+      return null
+    }
     throw new Error(`PayPal billing subscription ${subscription.id} has no local billing row`)
   }
 

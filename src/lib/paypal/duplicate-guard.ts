@@ -101,7 +101,7 @@ export async function cancelAndMarkPayPalDuplicate({
     }
   }
 
-  await markPayPalCheckoutIntentDuplicate(supabase, token, reason)
+  await markPayPalCheckoutIntentDuplicate(supabase, token, reason, subscriptionId)
 }
 
 async function hasCurrentAccessForUser(

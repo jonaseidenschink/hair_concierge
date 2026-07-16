@@ -87,6 +87,10 @@ test("approved public copy uses serious, non-medical product framing", () => {
   const faqSource = readFileSync("src/components/landing/faq.tsx", "utf8")
   const analysisSource = readFileSync("src/components/quiz/quiz-analysis.tsx", "utf8")
   const pricingSource = readFileSync("src/components/quiz/result-offer-pricing.tsx", "utf8")
+  const planSelectorSource = readFileSync(
+    "src/components/checkout/subscription-plan-selector.tsx",
+    "utf8",
+  )
   const socialImageSource = readFileSync("src/app/opengraph-image.tsx", "utf8")
   const privacySource = readFileSync("src/app/datenschutz/page.tsx", "utf8")
   const termsSource = readFileSync("src/app/agb/page.tsx", "utf8")
@@ -98,7 +102,7 @@ test("approved public copy uses serious, non-medical product framing", () => {
   assert.match(footerSource, /Strukturierte Haarpflege-Auswertung auf Basis deiner Angaben/)
   assert.match(faqSource, /Chaarlie sicher bereitzustellen und zu verbessern/)
   assert.match(analysisSource, /Deine Pflegebedürfnisse werden eingeordnet/)
-  assert.match(pricingSource, /Details in den Bedingungen/)
+  assert.match(planSelectorSource, /Details in den Bedingungen/)
   assert.match(socialImageSource, /MÖGLICHES PFLEGEZIEL/)
   assert.match(privacySource, /persönliche Auswertung und Routine/)
   assert.match(termsSource, /Auswertungen, Routinen, Produktempfehlungen/)
@@ -109,6 +113,7 @@ test("approved public copy uses serious, non-medical product framing", () => {
   assert.doesNotMatch(faqSource, /ausschließlich verwendet/)
   assert.doesNotMatch(analysisSource, /Protein-Feuchtigkeits-Balance wird berechnet/)
   assert.doesNotMatch(pricingSource, /Kein Risiko/)
+  assert.doesNotMatch(planSelectorSource, /Kein Risiko/)
   assert.doesNotMatch(socialImageSource, /IN 4 WOCHEN/)
   assert.doesNotMatch(privacySource, /persönliche Diagnose und Routine/)
   assert.doesNotMatch(termsSource, /Diagnosen, Routinen, Produktempfehlungen/)

@@ -5,7 +5,7 @@
     "channel": "organic",
     "status": "active",
     "landingVariant": "default",
-    "offerVariant": "default"
+    "offerVariant": "app-value-stack"
   },
   {
     "key": "scalp_check_placeholder",
@@ -14,6 +14,14 @@
     "status": "placeholder",
     "landingVariant": "default",
     "offerVariant": "default"
+  },
+  {
+    "key": "meta_routine_v1",
+    "slug": "routine",
+    "channel": "meta",
+    "status": "active",
+    "landingVariant": "default",
+    "offerVariant": "app-value-stack"
   },
   {
     "key": "social_proof_below",

@@ -44,7 +44,9 @@ test.describe.skip("Stripe subscription golden path (manual)", () => {
       timeout: 45_000,
     })
     await page.getByRole("button", { name: /MEIN HAARPROFIL ANSEHEN/i }).click()
-    await expect(page.getByText(/Analyse fertig/i)).toBeVisible({ timeout: 15_000 })
+    await page.waitForURL(/\/result\/[^/?#]+/, { timeout: 15_000 })
+    await expect(page.getByRole("heading", { name: /So begleitet dich Chaarlie/i })).toBeVisible()
+    await expect(page.getByText(/Warum Chaarlie ein Abo ist/i)).toHaveCount(0)
 
     // 2. Start checkout from the result offer page's selected plan CTA.
     await page.getByRole("button", { name: /Jetzt starten.*34,99.*Quartal/i }).click()

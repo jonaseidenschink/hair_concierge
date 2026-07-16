@@ -490,6 +490,13 @@ test("AgentV2TraceSchema accepts turn-gate trace fields", () => {
       enabled: true,
       latency_ms: 12,
     },
+    tracker_context: {
+      load_status: "unavailable",
+      load_reason: "query_failed",
+      logged_day_count: 0,
+      insight_count: 0,
+      load_ms: 4,
+    },
     blocked_tool_calls: [],
     loaded_guidance_package_ids: [],
     validation_errors: [],

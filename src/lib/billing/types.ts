@@ -3,6 +3,13 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 export type BillingProvider = "stripe" | "paypal"
 export type BillingInterval = "month" | "quarter" | "year"
 export type BillingEntitlementStatus = "active" | "past_due" | "canceled" | "incomplete"
+export type BillingPlanChangeStatus =
+  | "pending_provider"
+  | "pending_approval"
+  | "scheduled"
+  | "reconciling"
+  | "applied"
+  | "failed"
 export type BillingAnalyticsDestination = "customerio" | "meta" | "posthog"
 export type BillingAnalyticsDeliveryStatus =
   | "pending"
@@ -37,6 +44,73 @@ export interface BillingSubscriptionRow {
   created_at: string
   updated_at: string
 }
+
+export interface BillingPlanChangeRow {
+  id: string
+  operation_id: string
+  billing_subscription_id: string
+  user_id: string
+  provider: BillingProvider
+  current_interval: BillingInterval
+  target_interval: BillingInterval
+  effective_at: string
+  status: BillingPlanChangeStatus
+  provider_resource_id: string | null
+  provider_target_id: string | null
+  approved_at: string | null
+  applied_at: string | null
+  failure_code: string | null
+  metadata: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+export type MembershipManagementState =
+  | {
+      kind: "manageable"
+      provider: BillingProvider
+      currentInterval: BillingInterval
+      renewalAt: string
+      cancelAtPeriodEnd: false
+    }
+  | {
+      kind: "pending"
+      provider: BillingProvider
+      currentInterval: BillingInterval
+      renewalAt: string
+      cancelAtPeriodEnd: false
+      targetInterval: BillingInterval
+      effectiveAt: string
+      approvalUrl?: string
+    }
+  | {
+      kind: "reconciling"
+      provider: BillingProvider
+      currentInterval: BillingInterval
+      renewalAt: string
+      cancelAtPeriodEnd: false
+      targetInterval: BillingInterval
+      effectiveAt: string
+      operationId: string
+      retryable: boolean
+    }
+  | {
+      kind: "payment_problem"
+      provider: BillingProvider
+      currentInterval: BillingInterval | null
+      renewalAt: string | null
+      cancelAtPeriodEnd: boolean
+    }
+  | {
+      kind: "canceled_at_period_end"
+      provider: BillingProvider
+      currentInterval: BillingInterval | null
+      renewalAt: string | null
+      cancelAtPeriodEnd: true
+    }
+  | { kind: "manual_grant"; renewalAt: string | null }
+  | { kind: "legacy_unmanageable"; renewalAt: string | null }
+  | { kind: "uncertain" }
 
 export type BillingSubscriptionInput = {
   user_id: string

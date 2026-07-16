@@ -1,6 +1,9 @@
 import type { BillingInterval } from "./intervals"
 
 export interface StripePricingPlan {
+  analyticsId: string
+  amount: number
+  currency: "EUR"
   interval: BillingInterval
   name: string
   price: string
@@ -12,6 +15,9 @@ export interface StripePricingPlan {
 
 export const STRIPE_PRICING_PLANS: readonly StripePricingPlan[] = [
   {
+    analyticsId: "premium_month",
+    amount: 14.99,
+    currency: "EUR",
     interval: "month",
     name: "Monatlich",
     price: "€14,99",
@@ -19,6 +25,9 @@ export const STRIPE_PRICING_PLANS: readonly StripePricingPlan[] = [
     ctaLabel: "Jetzt starten — €14,99 / Monat",
   },
   {
+    analyticsId: "premium_quarter",
+    amount: 34.99,
+    currency: "EUR",
     interval: "quarter",
     name: "Quartal",
     price: "€34,99",
@@ -28,6 +37,9 @@ export const STRIPE_PRICING_PLANS: readonly StripePricingPlan[] = [
     ctaLabel: "Jetzt starten — €34,99 im Quartal",
   },
   {
+    analyticsId: "premium_year",
+    amount: 99.99,
+    currency: "EUR",
     interval: "year",
     name: "Jährlich",
     price: "€99,99",

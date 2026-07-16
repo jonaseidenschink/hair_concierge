@@ -13,9 +13,10 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { ManageSubscriptionButton } from "@/components/profile/manage-subscription-button"
-import { formatBillingDate, formatBillingMembershipStatus } from "@/lib/billing/display"
-import { findVisibleBillingSubscriptionForUser } from "@/lib/billing/subscriptions"
-import type { BillingSubscriptionRow } from "@/lib/billing/types"
+import { ProfilePlanSwitcher } from "@/components/profile/profile-plan-switcher"
+import type { MembershipManagementState } from "@/lib/billing/types"
+import { formatBillingDate } from "@/lib/billing/display"
+import { intervalLabel } from "@/lib/billing/plan-change"
 import type { OnboardingStep } from "@/lib/onboarding/store"
 import {
   coerceUserProductUsageRows,
@@ -43,14 +44,7 @@ import {
   SCALP_CONDITION_LABELS,
   SCALP_TYPE_LABELS,
 } from "@/lib/types"
-import {
-  CHEMICAL_TREATMENTS,
-  PRODUCT_FREQUENCY_LABELS,
-  fehler,
-  HAIR_LENGTH_OPTIONS,
-  normalizeProductFrequency,
-  type ProductFrequencyInput,
-} from "@/lib/vocabulary"
+import { CHEMICAL_TREATMENTS, fehler, HAIR_LENGTH_OPTIONS } from "@/lib/vocabulary"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/providers/auth-provider"
 import { useToast } from "@/providers/toast-provider"
@@ -58,6 +52,15 @@ import { useToast } from "@/providers/toast-provider"
 type MemoryApiResponse = {
   settings: { memory_enabled: boolean }
   entries: UserMemoryEntry[]
+}
+
+function membershipStatusLabel(state: MembershipManagementState) {
+  if (state.kind === "payment_problem") return "Zahlung ausstehend"
+  if (state.kind === "canceled_at_period_end") return "Verlängerung gekündigt"
+  if (state.kind === "manual_grant") return "Aktiver Sonderzugang"
+  if (state.kind === "legacy_unmanageable") return "Aktiv"
+  if (state.kind === "uncertain") return "Status wird geprüft"
+  return "Aktiv"
 }
 
 type StructuredField = ProfileFieldConfig & { value: ProfileFieldValue }
@@ -254,10 +257,6 @@ function toggleConcern(currentValues: ProfileConcern[], concern: ProfileConcern)
   }
 
   return [...currentValues, concern]
-}
-
-function formatNullableDate(value: string | null | undefined): string {
-  return formatBillingDate(value)
 }
 
 function getCompletionLabel(filled: number, total: number) {
@@ -497,9 +496,12 @@ export default function ProfilePage() {
   const [memorySaving, setMemorySaving] = useState(false)
   const [editingMemoryId, setEditingMemoryId] = useState<string | null>(null)
   const [memoryDraft, setMemoryDraft] = useState("")
-  const [billingSubscription, setBillingSubscription] = useState<BillingSubscriptionRow | null>(
-    null,
-  )
+  const [membershipState, setMembershipState] = useState<MembershipManagementState | null>(null)
+  const [membershipLoading, setMembershipLoading] = useState(true)
+  const [membershipError, setMembershipError] = useState(false)
+  const [membershipReloadKey, setMembershipReloadKey] = useState(0)
+  const [membershipReactivated, setMembershipReactivated] = useState(false)
+  const [planChangeNotice, setPlanChangeNotice] = useState<string | null>(null)
 
   useEffect(() => {
     let active = true
@@ -548,27 +550,59 @@ export default function ProfilePage() {
   useEffect(() => {
     let active = true
 
-    async function loadBillingSubscription() {
+    async function loadMembershipState() {
       if (!userId) {
-        if (active) setBillingSubscription(null)
+        if (active) {
+          setMembershipLoading(false)
+          setMembershipError(true)
+        }
         return
       }
 
+      setMembershipLoading(true)
+      setMembershipError(false)
       try {
-        const row = await findVisibleBillingSubscriptionForUser(supabase, userId)
-        if (active) setBillingSubscription(row)
+        const response = await fetch("/api/billing/membership", { cache: "no-store" })
+        if (!response.ok) throw new Error(`membership state request failed: ${response.status}`)
+        const body = (await response.json()) as { state?: MembershipManagementState }
+        if (!body.state || typeof body.state.kind !== "string") {
+          throw new Error("membership access response invalid")
+        }
+        if (!active) return
+        setMembershipState(body.state)
       } catch (error) {
-        console.error("Error loading billing subscription:", error)
-        if (active) setBillingSubscription(null)
+        console.error("Error loading membership state:", error)
+        if (active) {
+          setMembershipState({ kind: "uncertain" })
+          setMembershipError(true)
+        }
+      } finally {
+        if (active) setMembershipLoading(false)
       }
     }
 
-    loadBillingSubscription()
+    loadMembershipState()
 
     return () => {
       active = false
     }
-  }, [supabase, userId])
+  }, [membershipReloadKey, userId])
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const membership = params.get("membership")
+    setMembershipReactivated(membership === "reactivated")
+    const planChange = params.get("plan-change")
+    setPlanChangeNotice(
+      planChange === "cancelled"
+        ? "Der Wechsel wurde nicht bestätigt. Dein bisheriger Plan bleibt unverändert."
+        : planChange === "reconciling"
+          ? "Deine Bestätigung wird noch mit PayPal abgeglichen. Du musst nichts weiter tun."
+          : planChange === "scheduled"
+            ? "Dein Planwechsel wurde bestätigt."
+            : null,
+    )
+  }, [])
 
   useEffect(() => {
     let active = true
@@ -1507,7 +1541,7 @@ export default function ProfilePage() {
                               </p>
                             ) : null}
                           </div>
-                          <p
+                          <div
                             className={cn(
                               "text-sm",
                               row.productName ? "text-foreground" : "text-muted-foreground",
@@ -1515,11 +1549,11 @@ export default function ProfilePage() {
                           >
                             {row.productName ?? "Noch offen"}
                             {row.reviewStatusLabel ? (
-                              <span className="mt-2 block">
+                              <div className="mt-2">
                                 <ProductReviewStatusBadge label={row.reviewStatusLabel} />
-                              </span>
+                              </div>
                             ) : null}
-                          </p>
+                          </div>
                           <p
                             className={cn(
                               "text-sm",
@@ -1552,7 +1586,7 @@ export default function ProfilePage() {
                             {row.categoryLabel}
                           </p>
                           <div className="mt-3 space-y-2 text-sm">
-                            <p>
+                            <div>
                               <span className="text-muted-foreground">Produkt:</span>{" "}
                               <span
                                 className={
@@ -1562,11 +1596,11 @@ export default function ProfilePage() {
                                 {row.productName ?? "Noch offen"}
                               </span>
                               {row.reviewStatusLabel ? (
-                                <span className="mt-2 block">
+                                <div className="mt-2">
                                   <ProductReviewStatusBadge label={row.reviewStatusLabel} />
-                                </span>
+                                </div>
                               ) : null}
-                            </p>
+                            </div>
                             <p>
                               <span className="text-muted-foreground">Häufigkeit:</span>{" "}
                               <span
@@ -1937,37 +1971,106 @@ export default function ProfilePage() {
               ) : null}
             </Card>
 
-            {(profile?.stripe_customer_id || billingSubscription) && (
-              <section className="mt-4 rounded-2xl border border-border/60 bg-card/60 p-6">
-                <h2 className="mb-3 font-[family-name:var(--font-display)] text-lg font-medium text-[var(--text-heading)]">
-                  Mitgliedschaft
-                </h2>
-                <p className="mb-1 text-sm text-muted-foreground">
-                  Status:{" "}
-                  <strong className="text-foreground">
-                    {formatBillingMembershipStatus(
-                      billingSubscription,
-                      profile?.subscription_status,
-                    )}
-                  </strong>
-                </p>
-                <p className="mb-4 text-sm text-muted-foreground">
-                  Nächste Abrechnung / Laufzeitende:{" "}
-                  <strong className="text-foreground">
-                    {formatNullableDate(
-                      billingSubscription?.current_period_end ?? profile?.current_period_end,
-                    )}
-                  </strong>
-                </p>
-                <ManageSubscriptionButton
-                  provider={billingSubscription?.provider ?? "stripe"}
-                  currentPeriodEnd={
-                    billingSubscription?.current_period_end ?? profile?.current_period_end
-                  }
-                  cancelAtPeriodEnd={billingSubscription?.cancel_at_period_end ?? false}
-                />
-              </section>
-            )}
+            <section
+              id="mitgliedschaft"
+              className="mt-4 scroll-mt-24 rounded-2xl border border-border/60 bg-card/60 p-6"
+            >
+              <h2 className="mb-3 font-[family-name:var(--font-display)] text-lg font-medium text-[var(--text-heading)]">
+                Mitgliedschaft
+              </h2>
+
+              {membershipReactivated ? (
+                <div className="mb-4 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-900">
+                  Deine Mitgliedschaft wurde reaktiviert. Schön, dass du wieder da bist.
+                </div>
+              ) : null}
+
+              {planChangeNotice ? (
+                <div className="mb-4 rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-foreground">
+                  {planChangeNotice}
+                </div>
+              ) : null}
+
+              {membershipLoading ? (
+                <div className="space-y-2" aria-label="Mitgliedschaft wird geladen">
+                  <Skeleton className="h-5 w-36" />
+                  <Skeleton className="h-10 w-52" />
+                </div>
+              ) : null}
+
+              {!membershipLoading && membershipState && membershipState.kind !== "uncertain" ? (
+                <>
+                  <p className="mb-1 text-sm text-muted-foreground">
+                    Status:{" "}
+                    <strong className="text-foreground">
+                      {membershipStatusLabel(membershipState)}
+                    </strong>
+                  </p>
+                  {"provider" in membershipState ? (
+                    <p className="mb-1 text-sm text-muted-foreground">
+                      Anbieter:{" "}
+                      <strong className="text-foreground">
+                        {membershipState.provider === "paypal" ? "PayPal" : "Stripe"}
+                      </strong>
+                    </p>
+                  ) : null}
+                  {"currentInterval" in membershipState && membershipState.currentInterval ? (
+                    <p className="mb-1 text-sm text-muted-foreground">
+                      Aktueller Plan:{" "}
+                      <strong className="text-foreground">
+                        {intervalLabel(membershipState.currentInterval)}
+                      </strong>
+                    </p>
+                  ) : null}
+                  {membershipState.renewalAt ? (
+                    <p className="mb-4 text-sm text-muted-foreground">
+                      Nächste Abrechnung / Laufzeitende:{" "}
+                      <strong className="text-foreground">
+                        {formatBillingDate(membershipState.renewalAt)}
+                      </strong>
+                    </p>
+                  ) : (
+                    <p className="mb-4 text-sm text-muted-foreground">
+                      Dein Chaarlie-Zugang ist aktiv.
+                    </p>
+                  )}
+                  {"provider" in membershipState ? (
+                    <ManageSubscriptionButton
+                      provider={membershipState.provider}
+                      currentPeriodEnd={membershipState.renewalAt}
+                      cancelAtPeriodEnd={membershipState.cancelAtPeriodEnd}
+                    />
+                  ) : null}
+                  {membershipState.kind === "legacy_unmanageable" && profile?.stripe_customer_id ? (
+                    <ManageSubscriptionButton
+                      provider="stripe"
+                      currentPeriodEnd={membershipState.renewalAt}
+                    />
+                  ) : null}
+                  <ProfilePlanSwitcher
+                    state={membershipState}
+                    onRefresh={() => setMembershipReloadKey((current) => current + 1)}
+                  />
+                </>
+              ) : null}
+
+              {!membershipLoading && (membershipError || membershipState?.kind === "uncertain") ? (
+                <>
+                  <p className="text-sm text-muted-foreground">
+                    Der Mitgliedschaftsstatus konnte gerade nicht sicher geladen werden. Änderungen
+                    sind deshalb vorerst gesperrt.
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="mt-4 w-auto"
+                    onClick={() => setMembershipReloadKey((current) => current + 1)}
+                  >
+                    Status erneut prüfen
+                  </Button>
+                </>
+              ) : null}
+            </section>
 
             <Card className="mt-4 border-border/60 bg-card/60">
               <CardHeader className="pb-3">

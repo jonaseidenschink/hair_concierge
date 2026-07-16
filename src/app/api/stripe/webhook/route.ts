@@ -387,7 +387,13 @@ export async function handleStripeWebhookEvent(event: Stripe.Event, deps: Stripe
       break
     }
     case "customer.subscription.updated": {
-      const subscription = event.data.object as unknown as Stripe.Subscription
+      const eventSubscription = event.data.object as unknown as Stripe.Subscription
+      // Stripe can deliver subscription events out of order. Re-read provider truth
+      // before updating local entitlement and interval state so a delayed snapshot
+      // cannot overwrite a newer plan change.
+      const subscription = await stripe.subscriptions.retrieve(eventSubscription.id, {
+        expand: ["items.data.price"],
+      })
       const result = await handleSubscriptionUpdated(subscription, {
         supabase,
       })

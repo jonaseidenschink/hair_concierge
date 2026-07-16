@@ -136,6 +136,10 @@ test("classifies every current protected page and API route", () => {
     "/api/routine/products",
     "/api/routine/products/example",
     "/api/routine/suggestions/example/dismiss",
+    "/api/tracker",
+    "/api/tracker/dismiss-nudge",
+    "/api/tracker/log",
+    "/tracker",
   ]
 
   for (const pathname of protectedRoutes) {

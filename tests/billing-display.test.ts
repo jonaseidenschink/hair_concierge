@@ -17,7 +17,7 @@ test("billing status labels canceled subscriptions with paid-through access", ()
   assert.equal(label, "Verlängerung gekündigt, Zugang bis 3.7.2026")
 })
 
-test("billing status falls back to the raw status when canceled access is already expired", () => {
+test("billing status translates an expired cancellation", () => {
   const label = formatBillingMembershipStatus(
     {
       entitlement_status: "canceled",
@@ -28,7 +28,13 @@ test("billing status falls back to the raw status when canceled access is alread
     new Date("2026-06-03T12:00:00.000Z"),
   )
 
-  assert.equal(label, "canceled")
+  assert.equal(label, "Gekündigt")
+})
+
+test("billing status translates provider entitlement states", () => {
+  assert.equal(formatBillingMembershipStatus(null, "active"), "Aktiv")
+  assert.equal(formatBillingMembershipStatus(null, "past_due"), "Zahlung ausstehend")
+  assert.equal(formatBillingMembershipStatus(null, "incomplete"), "Unvollständig")
 })
 
 test("manage subscription button resets loading after request failures", () => {

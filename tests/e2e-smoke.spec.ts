@@ -33,10 +33,13 @@ test.describe("Core user flows — smoke test @ci", () => {
     await expect(page).toHaveURL(/\/quiz(\?.*)?$/)
   })
 
-  test("/pricing with a lead param still renders the plans", async ({ page }) => {
-    await page.goto("/pricing?lead=smoke-test-lead")
-    await expect(page).toHaveURL(/\/pricing/)
-    await expect(page.getByRole("heading", { name: /Haar-Concierge/i })).toBeVisible()
+  test("/pricing with a lead param redirects to the personalized result offer", async ({
+    page,
+  }) => {
+    await page.goto("/pricing?lead=00000000-0000-4000-8000-000000000001")
+    await expect(page).toHaveURL(
+      /\/result\/00000000-0000-4000-8000-000000000001\?focus=unlock-plan/,
+    )
   })
 
   test("2. Quiz page loads with intro and first quiz step after clicking start", async ({

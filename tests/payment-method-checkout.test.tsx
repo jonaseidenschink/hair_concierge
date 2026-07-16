@@ -3,8 +3,13 @@ import { readFileSync } from "node:fs"
 import test from "node:test"
 import { renderToStaticMarkup } from "react-dom/server"
 
-import { PaymentMethodCheckout } from "../src/components/checkout/payment-method-checkout"
+import {
+  createPaymentMethodCheckoutState,
+  PaymentMethodCheckout,
+  paymentMethodCheckoutReducer,
+} from "../src/components/checkout/payment-method-checkout"
 import { buildPayPalWelcomeUrl } from "../src/components/checkout/paypal-subscription-button"
+import { reportPayPalScriptFailureOnce } from "../src/components/checkout/paypal-script-failure"
 import { customerIoDestination } from "../src/lib/analytics/destinations/customerio"
 import {
   clearCustomerIoBrowserClient,
@@ -86,6 +91,37 @@ test("PayPal disabled checkout preserves the immediate Stripe checkout surface",
   assert.match(html, /min-h-\[560px\]/)
 })
 
+test("PayPal script rejection reports once without coupling the card fallback", () => {
+  const reported = { current: false }
+  const failures: unknown[] = []
+  let paymentState = createPaymentMethodCheckoutState(true)
+
+  assert.deepEqual(paymentState, { cardCheckoutOpen: false })
+  assert.equal(
+    reportPayPalScriptFailureOnce(reported, false, (failure) => failures.push(failure)),
+    false,
+  )
+  assert.equal(
+    reportPayPalScriptFailureOnce(reported, true, (failure) => failures.push(failure)),
+    true,
+  )
+  assert.equal(
+    reportPayPalScriptFailureOnce(reported, true, (failure) => failures.push(failure)),
+    false,
+  )
+  assert.deepEqual(failures, [
+    {
+      errorCode: "paypal_js_load_failed",
+      failureStage: "provider_session",
+      retryable: true,
+    },
+  ])
+
+  assert.deepEqual(paymentState, { cardCheckoutOpen: false })
+  paymentState = paymentMethodCheckoutReducer(paymentState, "reveal_card")
+  assert.deepEqual(paymentState, { cardCheckoutOpen: true })
+})
+
 test("Stripe payment helper copy is only shown before the embedded checkout expands", () => {
   const source = readFileSync(
     new URL("../src/components/checkout/payment-method-checkout.tsx", import.meta.url),
@@ -118,12 +154,32 @@ test("PayPal plan IDs are resolved by the server intent route", () => {
   assert.doesNotMatch(buttonSource, /PAYPAL_PLAN_ID_/)
   assert.match(buttonSource, /create-subscription-intent/)
   assert.match(buttonSource, /shipping_preference: "NO_SHIPPING"/)
+  assert.match(buttonSource, /errorCode: "paypal_approval_network_error"/)
+  assert.match(buttonSource, /usePayPalScriptReducer/)
+  assert.match(buttonSource, /<PayPalScriptFailureObserver/)
+  assert.match(buttonSource, /reportPayPalScriptFailureOnce\(reportedRef, isRejected/)
+  assert.match(buttonSource, /checkoutAttemptId,/)
 
   const routeSource = readFileSync(
     new URL("../src/app/api/paypal/create-subscription-intent/route.ts", import.meta.url),
     "utf8",
   )
   assert.match(routeSource, /getPayPalPlanId/)
+  assert.match(routeSource, /currency: analyticsPlan\.currency/)
+  assert.match(routeSource, /plan_id: analyticsPlan\.analyticsId/)
+  assert.match(routeSource, /value: analyticsPlan\.amount/)
+  assert.match(routeSource, /checkoutAttemptId: z\.string\(\)\.uuid\(\)\.optional\(\)/)
+  assert.match(routeSource, /checkout_attempt_id: checkoutAttemptId/)
+
+  const stripeRouteSource = readFileSync(
+    new URL("../src/app/api/stripe/create-checkout-session/route.ts", import.meta.url),
+    "utf8",
+  )
+  assert.match(stripeRouteSource, /currency: analyticsPlan\.currency/)
+  assert.match(stripeRouteSource, /plan_id: analyticsPlan\.analyticsId/)
+  assert.match(stripeRouteSource, /value: analyticsPlan\.amount/)
+  assert.match(stripeRouteSource, /checkoutAttemptId: z\.string\(\)\.uuid\(\)\.optional\(\)/)
+  assert.match(stripeRouteSource, /checkout_attempt_id: checkoutAttemptId/)
 })
 
 test("Cookie banner stacks above PayPal checkout iframes", () => {

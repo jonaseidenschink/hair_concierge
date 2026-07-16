@@ -114,8 +114,8 @@ export function AuthForm({
       {magicLinkError.type === "not_found" ? (
         <>
           Kein Konto mit dieser E-Mail. Schließe zuerst dein Abo ab.{" "}
-          <Link href="/pricing" className="font-medium underline hover:no-underline">
-            Zum Abo
+          <Link href="/quiz" className="font-medium underline hover:no-underline">
+            Zum Haar-Check
           </Link>
         </>
       ) : (
@@ -201,10 +201,13 @@ export function AuthForm({
     setMagicLinkError(null)
 
     try {
+      const confirmUrl = new URL("/auth/confirm", window.location.origin)
+      confirmUrl.searchParams.set("next", buildNextDestination(next, leadId ?? null))
+      if (leadId) confirmUrl.searchParams.set("lead", leadId)
       const { error } = await supabase.auth.signInWithOtp({
         email: trimmedEmail,
         options: {
-          emailRedirectTo: `${window.location.origin}/auth/confirm`,
+          emailRedirectTo: confirmUrl.toString(),
           shouldCreateUser: false,
         },
       })

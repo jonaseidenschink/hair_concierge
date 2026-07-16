@@ -1,6 +1,8 @@
 import { getOpenAI, getObservedOpenAI } from "@/lib/openai/client"
 import { createBuildOrFixRoutineTool } from "@/lib/agent/tools/build-or-fix-routine"
 import { buildCareBalanceToolContext } from "@/lib/agent/tools/care-balance-context"
+import { buildTrackingToolContext } from "@/lib/agent/tools/tracking-context"
+import { buildTrackingInsightContext } from "@/lib/agent/tools/tracking-insights"
 import { getUserContext, type UserContextProjection } from "@/lib/agent/tools/get-user-context"
 import {
   createSelectProductsTool,
@@ -64,6 +66,7 @@ import {
   type AgentV2RoutineProjection,
 } from "@/lib/agent-v2/tools/routine-projection"
 import { projectSelectProductsForAgentV2 } from "@/lib/agent-v2/tools/select-products-projection"
+import { loadTrackerDaysForAgent } from "@/lib/tracking/load-tracker-days"
 import {
   buildAgentV2Classification,
   buildAgentV2RouterDecision,
@@ -172,6 +175,7 @@ interface ProductionAgentV2PipelineDeps {
   observeAgentV2ToolCall?: typeof observeAgentV2ToolCall
   createProductIntakeRepository?: typeof createSupabaseProductIntakeRepository
   createAdminClient?: typeof createAdminClient
+  loadTrackerDays?: typeof loadTrackerDaysForAgent
 }
 
 const ROUTINE_PRODUCT_CATEGORY_VALUES = new Set<RoutineProduct>([
@@ -563,7 +567,7 @@ function buildAgentV2PromptSnapshot(params: {
   }
 }
 
-function buildAgentV2CareBalanceContext(
+function buildAgentV2CareBalanceState(
   profile: HairProfile | null,
   routineItems: PersistenceRoutineItemRow[],
 ) {
@@ -571,10 +575,13 @@ function buildAgentV2CareBalanceContext(
   const rowsWithActions = runtime.careBalance.rows.filter(
     (row) => row.recommendation !== "no_action",
   )
-  return buildCareBalanceToolContext({
-    runtime,
-    rows: rowsWithActions.length > 0 ? rowsWithActions : runtime.careBalance.rows,
-  })
+  return {
+    context: buildCareBalanceToolContext({
+      runtime,
+      rows: rowsWithActions.length > 0 ? rowsWithActions : runtime.careBalance.rows,
+    }),
+    rows: runtime.careBalance.rows,
+  }
 }
 
 function readAgentV2EffectiveCareContext(
@@ -1219,6 +1226,7 @@ export async function runAgentV2ProductionPipeline(
     { result: userContext, durationMs: contextLoadMs },
     { result: memoryContext, durationMs: memoryLoadMs },
     { result: rawConversationState },
+    { result: trackerLoad, durationMs: trackerLoadMs },
   ] = await Promise.all([
     measureAsync(() =>
       (deps.loadConversationHistory ?? loadAgentV2ProductionConversationHistory)(
@@ -1236,14 +1244,29 @@ export async function runAgentV2ProductionPipeline(
             userId,
           }),
     ),
+    measureAsync(() => (deps.loadTrackerDays ?? loadTrackerDaysForAgent)(userId)),
   ])
 
   const conversationState = normalizeAgentV2ConversationState(rawConversationState)
   const recentMessages = projectRecentMessages(conversationHistory)
-  const careBalanceContext = buildAgentV2CareBalanceContext(
+  const careBalanceState = buildAgentV2CareBalanceState(
     userContext.profile,
     userContext.routine_inventory,
   )
+  const careBalanceContext = careBalanceState.context
+  const trackingContext =
+    trackerLoad.status === "available"
+      ? buildTrackingToolContext({ days: trackerLoad.days, today: trackerLoad.referenceDate })
+      : null
+  const trackingInsightContext =
+    trackerLoad.status === "available"
+      ? buildTrackingInsightContext({
+          days: trackerLoad.days,
+          today: trackerLoad.referenceDate,
+          careBalanceRows: careBalanceState.rows,
+          activeDismissals: trackerLoad.activeDismissals,
+        })
+      : null
   const selectedProductResults: SelectProductsToolResult[] = []
   const selectedProductProjections: ReturnType<typeof projectSelectProductsForAgentV2>[] = []
   const productLookupExecutions: ProductLookupExecution[] = []
@@ -1356,6 +1379,8 @@ export async function runAgentV2ProductionPipeline(
       missingProfile: userContext.missing_profile,
       sessionMemory,
       careBalanceContext,
+      trackingContext,
+      trackingInsightContext,
     },
     currentRoutineLayer: routineThreadContext?.active ? routineThreadContext.current_layer : null,
     routineThreadContext,
@@ -1629,6 +1654,13 @@ export async function runAgentV2ProductionPipeline(
     engine_variant: "agent_v2_care_balance",
     agent_v2_trace: {
       ...result.trace,
+      tracker_context: {
+        load_status: trackerLoad.status,
+        load_reason: trackerLoad.reason,
+        logged_day_count: trackerLoad.days.length,
+        insight_count: trackingInsightContext?.insights.length ?? 0,
+        load_ms: trackerLoadMs,
+      },
       routine_thread_context: {
         ...nextRoutineThreadContext,
         visible_steps: persistedVisibleRoutineSteps,

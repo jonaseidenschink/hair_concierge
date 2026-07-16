@@ -23,7 +23,19 @@ export function formatBillingMembershipStatus(
     return `Verlängerung gekündigt, Zugang bis ${formatBillingDate(subscription.current_period_end)}`
   }
 
-  return subscription?.entitlement_status ?? fallbackStatus ?? "—"
+  const status = subscription?.entitlement_status ?? fallbackStatus
+  switch (status) {
+    case "active":
+      return "Aktiv"
+    case "past_due":
+      return "Zahlung ausstehend"
+    case "canceled":
+      return "Gekündigt"
+    case "incomplete":
+      return "Unvollständig"
+    default:
+      return status ?? "—"
+  }
 }
 
 function isFutureDate(value: string | null | undefined, now: Date): boolean {

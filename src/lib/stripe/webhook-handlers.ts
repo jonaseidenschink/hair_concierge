@@ -10,6 +10,7 @@ import {
   findBillingSubscriptionByProviderId,
   upsertBillingSubscription,
 } from "@/lib/billing/subscriptions"
+import { applyPlanChangeAtRenewal } from "@/lib/billing/plan-change"
 
 export type HandlerDeps = CheckoutActivationDeps
 type SubscriptionUpdateDeps = Pick<HandlerDeps, "supabase">
@@ -265,7 +266,7 @@ export async function handleSubscriptionUpdated(
     ? stripeEntitlementStatus(s.status)
     : "canceled"
 
-  await upsertBillingSubscription(deps.supabase, {
+  const billingRow = await upsertBillingSubscription(deps.supabase, {
     user_id: profile.id,
     provider: "stripe",
     provider_customer_id: s.customer,
@@ -275,6 +276,11 @@ export async function handleSubscriptionUpdated(
     interval,
     current_period_end: subPeriodEndIso(s),
     cancel_at_period_end: s.cancel_at_period_end ?? false,
+  })
+  await applyPlanChangeAtRenewal(deps.supabase, {
+    subscription: billingRow,
+    observedInterval: interval,
+    occurredAt: new Date().toISOString(),
   })
   return { matchedCurrentSubscription, profileId: profile.id }
 }

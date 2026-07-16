@@ -1,3 +1,4 @@
+import { shouldInitializeBrowserVendorAnalytics } from "@/lib/analytics/runtime/environment"
 import { isFunnelMetaBrowserCustomDataEnabled } from "@/lib/funnel/flags"
 
 const DEFAULT_PIXEL_ID = process.env.NEXT_PUBLIC_META_PIXEL_ID || "988892550357504"
@@ -28,10 +29,13 @@ type Fbq = ((command: string, ...args: unknown[]) => void) & {
 type MetaWindow = {
   _fbq?: Fbq
   fbq?: Fbq
+  location?: { hostname?: string }
 }
 
 type BrowserTargets = {
   doc?: Document
+  hostname?: string
+  localVendorAnalyticsOverride?: boolean
   pixelId?: string
   win?: MetaWindow
 }
@@ -66,7 +70,12 @@ function getBrowserTargets(options: BrowserTargets = {}) {
   const win =
     options.win ?? (typeof window === "undefined" ? undefined : (window as unknown as MetaWindow))
   const doc = options.doc ?? (typeof document === "undefined" ? undefined : document)
-  return { doc, pixelId: options.pixelId ?? DEFAULT_PIXEL_ID, win }
+  return {
+    doc,
+    hostname: options.hostname ?? win?.location?.hostname,
+    pixelId: options.pixelId ?? DEFAULT_PIXEL_ID,
+    win,
+  }
 }
 
 function sanitizeProperties(properties?: MetaEventProperties) {
@@ -112,8 +121,11 @@ function installFbq(win: MetaWindow, doc: Document) {
 }
 
 export function initMetaPixel(options: BrowserTargets = {}) {
-  const { doc, pixelId, win } = getBrowserTargets(options)
+  const { doc, hostname, pixelId, win } = getBrowserTargets(options)
   if (!pixelId || !win || !doc) return false
+  if (!shouldInitializeBrowserVendorAnalytics(hostname, options.localVendorAnalyticsOverride)) {
+    return false
+  }
 
   installFbq(win, doc)
 
@@ -361,6 +373,7 @@ export function trackMetaPricingViewed(
 export function trackMetaCheckoutStarted(
   source: "pricing_page" | "quiz_result_offer",
   interval: string | null,
+  commerce: { currency?: string; planId?: string; value?: number } = {},
   eventID?: string | null,
   packageKey?: string | null,
 ) {
@@ -368,7 +381,10 @@ export function trackMetaCheckoutStarted(
     "InitiateCheckout",
     {
       content_name: source,
+      content_ids: commerce.planId ? [commerce.planId] : undefined,
+      currency: commerce.currency,
       interval,
+      value: commerce.value,
       ...funnelPackageProperties(packageKey),
     },
     { eventID: eventID ?? undefined },

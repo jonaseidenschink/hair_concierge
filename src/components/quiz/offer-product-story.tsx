@@ -1,5 +1,6 @@
 const PRODUCT_STORY = [
   {
+    trackingId: "product_story_chat",
     image: "/images/offer/advisor.jpg",
     alt: "Chaarlie Chat mit persönlichem Haarkontext",
     kicker: "Fragen klären",
@@ -7,6 +8,7 @@ const PRODUCT_STORY = [
     body: "Ist dieses Produkt passend? Wie viel soll ich nehmen? Was ändere ich bei Frizz? Chaarlie kennt Profil und Routine und antwortet auf deinen Fall.",
   },
   {
+    trackingId: "product_story_routine",
     image: "/images/offer/routine.jpg",
     alt: "Chaarlie Routine mit konkreten Schritten",
     kicker: "Routine aufbauen",
@@ -14,6 +16,7 @@ const PRODUCT_STORY = [
     body: "Dein vollständiger Plan verbindet Produktnamen, Rhythmus und Anwendung – und beginnt mit dem, was du schon besitzt.",
   },
   {
+    trackingId: "product_story_products",
     image: "/images/offer/products.jpg",
     alt: "Chaarlie Produktauswahl in einer Drogerie",
     kicker: "Produkte prüfen",
@@ -35,6 +38,7 @@ export function OfferProductStory() {
         {PRODUCT_STORY.map((item, index) => (
           <article
             key={item.title}
+            data-offer-section={item.trackingId}
             className="overflow-hidden rounded-[18px] border border-border bg-white"
           >
             <div className="h-[220px] overflow-hidden bg-[var(--brand-plum-ice)]">

@@ -88,10 +88,14 @@ function toCustomerIoPayload<E extends AppEventName>(eventName: E, payload: AppE
     case "checkout_started": {
       const data = payload as AppEventMap["checkout_started"]
       return {
+        checkout_context: data.checkoutContext,
+        currency: data.currency,
         interval: data.interval,
         lead_id: data.leadId,
+        plan_id: data.planId,
         provider: data.provider,
         source: data.source,
+        value: data.value,
       }
     }
     case "first_chat_message":
@@ -103,6 +107,7 @@ function toCustomerIoPayload<E extends AppEventName>(eventName: E, payload: AppE
     case "pricing_viewed": {
       const data = payload as AppEventMap["pricing_viewed"]
       return {
+        checkout_context: data.checkoutContext,
         lead_id: data.leadId,
         source: data.source,
       }
