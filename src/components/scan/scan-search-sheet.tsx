@@ -15,7 +15,19 @@ import { ScanProductThumb } from "./scan-product-thumb"
  * Fallback sheet (UI spec §7). Opens from the "Produkt suchen" link, after the scanner
  * fails to get a stable read, or when the camera is unavailable — the scanner is an
  * enhancement, this is the path that always works.
+ *
+ * The header answers the question the user actually has, which depends on how they got
+ * here (plan 2026-09-05): after the 3s timeout the sheet appeared on its own while they
+ * were still pointing at a barcode, so it names that ("Barcode nicht lesbar?") and says
+ * what happens next. Opened deliberately, or after a camera failure they have already
+ * been told about, it stays the plain "Ohne Scan finden".
  */
+
+export type ScanSearchReason = "timeout" | "manual" | "camera"
+
+const TIMEOUT_TITLE = "Barcode nicht lesbar?"
+const TIMEOUT_SUBLINE = "So findest du's trotzdem."
+const DEFAULT_TITLE = "Ohne Scan finden"
 
 const MIN_QUERY_LENGTH = 2
 const DEBOUNCE_MS = 250
@@ -27,11 +39,14 @@ type SearchStatus = "idle" | "loading" | "ready" | "error"
 
 export function ScanSearchSheet({
   open,
+  reason,
   onOpenChange,
   onSelectProduct,
   onSubmitIdentifier,
 }: {
   open: boolean
+  /** Why this sheet is up. Drives the header only — the search itself is identical. */
+  reason: ScanSearchReason
   onOpenChange: (open: boolean) => void
   onSelectProduct: (productId: string) => void
   onSubmitIdentifier: (identifier: { type: "ean"; value: string }) => void
@@ -91,7 +106,12 @@ export function ScanSearchSheet({
         contentClassName="px-4 pb-6 sm:px-5"
         header={
           <div className="px-4 pb-2 pt-1 sm:px-5">
-            <BottomSheetTitle className="text-[17px]">Ohne Scan finden</BottomSheetTitle>
+            <BottomSheetTitle className="text-[17px]">
+              {reason === "timeout" ? TIMEOUT_TITLE : DEFAULT_TITLE}
+            </BottomSheetTitle>
+            {reason === "timeout" ? (
+              <p className="mt-0.5 text-sm leading-6 text-[var(--text-sub)]">{TIMEOUT_SUBLINE}</p>
+            ) : null}
           </div>
         }
       >

@@ -7,6 +7,7 @@ import { ChevronDown } from "lucide-react"
 import type { PersonalPlanCategory } from "@/lib/personal-plan/products/contracts"
 import type { ScanUnknownProductResult } from "@/lib/scan/types"
 import {
+  SCAN_UNKNOWN_BRIDGE,
   SCAN_UNKNOWN_HEADLINE,
   SCAN_UNKNOWN_QUESTION,
   SCAN_UNKNOWN_SUBLINE,
@@ -66,7 +67,8 @@ export function ScanUnknownFlow({
         <h2 className="font-header text-2xl leading-tight text-foreground">
           {SCAN_UNKNOWN_HEADLINE}
         </h2>
-        <p className="mt-2 text-sm leading-6 text-[var(--text-sub)]">{SCAN_UNKNOWN_SUBLINE}</p>
+        <p className="mt-2 text-sm leading-6 text-foreground">{SCAN_UNKNOWN_BRIDGE}</p>
+        <p className="mt-1 text-sm leading-6 text-[var(--text-sub)]">{SCAN_UNKNOWN_SUBLINE}</p>
       </div>
 
       <p className="text-[15px] font-semibold leading-6 text-foreground">{SCAN_UNKNOWN_QUESTION}</p>

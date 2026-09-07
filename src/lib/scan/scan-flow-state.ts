@@ -1,3 +1,4 @@
+import type { ScanSearchReason } from "@/components/scan/scan-search-sheet"
 import type { ScanUnavailableReason } from "@/components/scan/scanner"
 
 import type { ScanSavedStatePayload } from "./saved-state"
@@ -43,6 +44,13 @@ export type ScanFlowState = {
   step: ScanFlowStep
   /** Sheets that open over a still-live scanner without changing the step. */
   auxiliary: "none" | "search" | "wishlist"
+  /**
+   * How the search sheet was last opened. Kept as its own field rather than folded into
+   * `auxiliary` so every existing `auxiliary` check (and the `data-scan-auxiliary`
+   * attribute the Playwright spec reads) stays a plain string comparison. Only the
+   * sheet's header depends on it; the search behind it is the same either way.
+   */
+  searchReason: ScanSearchReason
   saveOpen: boolean
   camera: ScanCameraState
   submitting: boolean
@@ -61,7 +69,7 @@ export type ScanFlowAction =
   | { type: "submitted"; token: number; pending: ScanPendingSubmissionResult }
   | { type: "submit_failed"; token: number; error: string }
   | { type: "return_to_scanning" }
-  | { type: "auxiliary_opened"; sheet: "search" | "wishlist" }
+  | { type: "auxiliary_opened"; sheet: "search" | "wishlist"; searchReason?: ScanSearchReason }
   | { type: "auxiliary_closed" }
   | { type: "save_sheet_toggled"; open: boolean }
   | { type: "saved_state_changed"; productId: string; savedState: ScanSavedStatePayload }
@@ -73,6 +81,7 @@ export type ScanFlowAction =
 export const initialScanFlowState: ScanFlowState = {
   step: { kind: "scanning" },
   auxiliary: "none",
+  searchReason: "manual",
   saveOpen: false,
   camera: { status: "live" },
   submitting: false,
@@ -170,7 +179,14 @@ export function scanFlowReducer(state: ScanFlowState, action: ScanFlowAction): S
       // Can't happen today (both triggers are only reachable on the scanning step); kept
       // as an invariant so a search sheet can never hide behind a result sheet.
       if (state.step.kind !== "scanning") return state
-      return { ...state, auxiliary: action.sheet }
+      return {
+        ...state,
+        auxiliary: action.sheet,
+        // A reopen with no stated reason keeps the deliberate one: only the timeout and
+        // the camera failure open this sheet on the user's behalf, and both say so.
+        searchReason:
+          action.sheet === "search" ? (action.searchReason ?? "manual") : state.searchReason,
+      }
 
     case "auxiliary_closed":
       return { ...state, auxiliary: "none" }

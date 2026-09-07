@@ -605,13 +605,48 @@ for (const tileCase of TILE_CASES) {
     }
 
     // The search sheet still pops on the first failure, with the real reason tracked.
-    assert.equal(requireByType(flow.tree, ScanSearchSheet, "ScanSearchSheet").props.open, true)
+    const sheet = requireByType(flow.tree, ScanSearchSheet, "ScanSearchSheet")
+    assert.equal(sheet.props.open, true)
+    // The user was just told the camera failed, so the sheet keeps its plain header
+    // rather than asking about a barcode they never got to point at.
+    assert.equal(sheet.props.reason, "camera")
     assert.deepEqual(
       flow.events.filter((event) => event.name === "scan_fallback_search_used"),
       [{ name: "scan_fallback_search_used", payload: { trigger: tileCase.reason } }],
     )
   })
 }
+
+/**
+ * The 3s fallback opens the sheet on the user's behalf while they are still aiming at a
+ * barcode, so the sheet has to name that ("Barcode nicht lesbar?"); a deliberate tap on
+ * "Produkt suchen" must not (plan 2026-09-05).
+ */
+test("ScanFlow: the sheet knows whether the timeout or the user opened it", async () => {
+  const flow = await mountFlow(notFound)
+
+  scannerProps(flow.tree).onTimeout()
+  await flow.settle()
+
+  let sheet = requireByType(flow.tree, ScanSearchSheet, "ScanSearchSheet")
+  assert.equal(sheet.props.open, true)
+  assert.equal(sheet.props.reason, "timeout")
+
+  sheet.props.onOpenChange(false)
+  await flow.settle()
+
+  const manual = findAll(
+    flow.tree,
+    (element) => element.type === "button" && textContent(element) === "Produkt suchen",
+  )[0]
+  assert.ok(manual)
+  manual.props.onClick()
+  await flow.settle()
+
+  sheet = requireByType(flow.tree, ScanSearchSheet, "ScanSearchSheet")
+  assert.equal(sheet.props.open, true)
+  assert.equal(sheet.props.reason, "manual")
+})
 
 test("ScanFlow: a stalled stream swaps in the restart tile", async () => {
   const flow = await mountFlow(notFound)

@@ -33,6 +33,12 @@ type ScanLabState = {
   cameraReason: string
   saveOpen: boolean
   epoch: number
+  /**
+   * What the VIEWFINDER is drawing — `searching` / `spotted` / `read`, or `""` while the
+   * scanner is not mounted at all. It lives on the scanner root (inside the flow root),
+   * not on the flow root, so it is read from its own element.
+   */
+  detection: string
 }
 
 type ScanLabEvent = { name: string; payload: unknown; t: number }
@@ -47,6 +53,13 @@ export type ScanLab = {
   emit(value: string, times?: number): void
   /** The frame goes empty for `times` detections, and stays empty (drives the D6 re-arm). */
   emitNone(times?: number): void
+  /**
+   * A barcode that is SEEN but never READ, held for as long as the test needs it: every
+   * detection answers a raw hit, but the value alternates, so the two consecutive
+   * matches a stable read needs never happen. `emit(value, 1)` cannot do this — its
+   * resting frame keeps answering the same value, and the very next cycle decodes it.
+   */
+  spot(first: string, second: string): void
   /** Drop everything queued and leave the frame empty. */
   clear(): void
   /**
@@ -65,7 +78,11 @@ export type ScanLab = {
   startCamera(): void
   /** Analytics the flow tracked, in order. */
   readonly events: ScanLabEvent[]
-  /** Every distinct flow state the root's data attributes went through, in order. */
+  /**
+   * Every distinct state the flow's (and the viewfinder's) data attributes went through,
+   * in order — `detection` is one field of it, so a state that only lasts a frame or two
+   * (`spotted` on the way to `read`) is still assertable after the fact.
+   */
   readonly transitions: ScanLabTransition[]
   /** The flow's current state, read off its root's data attributes. */
   readonly state: ScanLabState | null
@@ -108,12 +125,15 @@ function createFakeCameraStream(): MediaStream {
     if (!track || track.readyState === "ended") return
     frame += 1
     if (context) {
-      context.fillStyle = "#101014"
+      // A LIT frame on purpose: the loop samples mean luma twice a second and a dark
+      // canvas is (correctly) read as low light, which flips the pill to "Mehr Licht
+      // hilft" a beat after the camera starts — a hint the copy scenarios would then race.
+      context.fillStyle = "#f4f1ea"
       context.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT)
       // The moving bar is what makes the canvas "change": a static canvas produces no
       // new frames, the <video> never advances, and `requestVideoFrameCallback` (which
       // is what actually drives the detection loop) would never fire.
-      context.fillStyle = "#f4f1ea"
+      context.fillStyle = "#101014"
       context.fillRect((frame * 9) % (CANVAS_WIDTH - 60), 180, 60, 120)
     }
     requestAnimationFrame(draw)
@@ -125,6 +145,7 @@ function createFakeCameraStream(): MediaStream {
 function readFlowState(): ScanLabState | null {
   const root = document.querySelector("[data-scan-flow]")
   if (!root) return null
+  const viewfinder = root.querySelector("[data-scan-detection]")
   return {
     step: root.getAttribute("data-scan-step") ?? "",
     auxiliary: root.getAttribute("data-scan-auxiliary") ?? "",
@@ -132,6 +153,7 @@ function readFlowState(): ScanLabState | null {
     cameraReason: root.getAttribute("data-scan-camera-reason") ?? "",
     saveOpen: root.getAttribute("data-scan-save-open") === "true",
     epoch: Number(root.getAttribute("data-scan-epoch") ?? "0"),
+    detection: viewfinder?.getAttribute("data-scan-detection") ?? "",
   }
 }
 
@@ -152,6 +174,9 @@ function createScanLab(): ScanLabInternals {
    * the D6 re-arm (`emitNone`) and the F1 toast loop are about.
    */
   let restingFrame: ScanLabFrame = null
+  /** Set by `spot()`: the resting frame cycles through these instead of repeating. */
+  let restingCycle: readonly string[] | null = null
+  let restingIndex = 0
   let pendingFailure: string | null = null
   /** Armed by `holdDetection()`, consumed by the first `detect()` that reaches it. */
   let detectionGate: Promise<void> | null = null
@@ -186,6 +211,14 @@ function createScanLab(): ScanLabInternals {
     return stream
   }
 
+  /** What the lens sees once the queue runs dry — see `restingFrame` / `spot()`. */
+  const nextRestingFrame = (): ScanLabFrame => {
+    if (!restingCycle) return restingFrame
+    const value = restingCycle[restingIndex % restingCycle.length]
+    restingIndex += 1
+    return value
+  }
+
   const detectorFactory = async (): Promise<ScanBarcodeDetector> => ({
     async detect() {
       if (detectionGate) {
@@ -197,7 +230,7 @@ function createScanLab(): ScanLabInternals {
       detections += 1
       // Read AFTER the gate, so a barcode put in front of the lens while the cycle was
       // frozen is what the frozen cycle comes back with.
-      const frame = queue.length > 0 ? (queue.shift() as ScanLabFrame) : restingFrame
+      const frame = queue.length > 0 ? (queue.shift() as ScanLabFrame) : nextRestingFrame()
       if (frame === null) return []
       return [
         {
@@ -221,14 +254,23 @@ function createScanLab(): ScanLabInternals {
     emit(value, times = 2) {
       for (let index = 0; index < times; index += 1) queue.push(value)
       restingFrame = value
+      restingCycle = null
     },
     emitNone(times = 1) {
       for (let index = 0; index < times; index += 1) queue.push(null)
       restingFrame = null
+      restingCycle = null
+    },
+    spot(first, second) {
+      queue.length = 0
+      restingFrame = first
+      restingCycle = [first, second]
+      restingIndex = 0
     },
     clear() {
       queue.length = 0
       restingFrame = null
+      restingCycle = null
     },
     holdDetection() {
       if (detectionGate) return
@@ -289,7 +331,8 @@ function createScanLab(): ScanLabInternals {
       previous.camera === next.camera &&
       previous.cameraReason === next.cameraReason &&
       previous.saveOpen === next.saveOpen &&
-      previous.epoch === next.epoch
+      previous.epoch === next.epoch &&
+      previous.detection === next.detection
     ) {
       return
     }
@@ -306,6 +349,7 @@ function createScanLab(): ScanLabInternals {
       "data-scan-camera-reason",
       "data-scan-save-open",
       "data-scan-epoch",
+      "data-scan-detection",
     ],
   })
 

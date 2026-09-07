@@ -5,9 +5,15 @@
  * this on every telemetry tick.
  */
 
-export const SCAN_HINT_DEFAULT = "Barcode in den Rahmen halten" as const
+export const SCAN_HINT_DEFAULT = "Suche Barcode …" as const
+/**
+ * The pill while a barcode is in frame but not yet stably read (viewfinder feedback B).
+ * Not part of `ScanHint`: it is a detection state, not a telemetry-driven hint, and
+ * `nextScanHint` must never be able to return it.
+ */
+export const SCAN_HINT_SPOTTED = "Barcode gefunden – kurz stillhalten" as const
 /** Pill label during the decode-confirm moment (Variante A); ✓ is rendered by the pill. */
-export const SCAN_CONFIRM_LABEL = "Barcode erkannt" as const
+export const SCAN_CONFIRM_LABEL = "Gelesen – wird geprüft" as const
 export const SCAN_HINT_MOVE_CLOSER = "Etwas näher ran" as const
 export const SCAN_HINT_LESS_TILT = "Weniger kippen" as const
 export const SCAN_HINT_MORE_LIGHT = "Mehr Licht hilft" as const

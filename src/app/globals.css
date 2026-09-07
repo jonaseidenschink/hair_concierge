@@ -751,6 +751,46 @@
   animation-delay: 0.24s;
 }
 
+/*
+ * Produkt-Scan viewfinder feedback (plan 2026-09-05). Both animations live INSIDE
+ * `prefers-reduced-motion: no-preference`, so the class stays inert — not merely
+ * shortened — for anyone who asked for less motion: the corners simply sit at full
+ * opacity and the dot is a static dot.
+ */
+@media (prefers-reduced-motion: no-preference) {
+  /* The corners "breathe" while detection is running and nothing has been spotted. */
+  @keyframes scan-breathe {
+    0%,
+    100% {
+      opacity: 0.55;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+
+  .animate-scan-breathe {
+    animation: scan-breathe 2.4s ease-in-out infinite;
+  }
+
+  /* The idle pill's dot: the smallest possible "we are still looking" signal. */
+  @keyframes scan-dot {
+    0%,
+    100% {
+      opacity: 0.45;
+      transform: scale(0.82);
+    }
+    50% {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+
+  .animate-scan-dot {
+    animation: scan-dot 1.6s ease-in-out infinite;
+  }
+}
+
 /* Prose overrides for light background */
 .prose {
   --tw-prose-body: var(--text-body);

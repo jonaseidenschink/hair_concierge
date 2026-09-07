@@ -4,10 +4,12 @@ import test from "node:test"
 import {
   HINT_HYSTERESIS_MS,
   LOW_LIGHT_LUMA_THRESHOLD,
+  SCAN_CONFIRM_LABEL,
   SCAN_HINT_DEFAULT,
   SCAN_HINT_LESS_TILT,
   SCAN_HINT_MORE_LIGHT,
   SCAN_HINT_MOVE_CLOSER,
+  SCAN_HINT_SPOTTED,
   SMALL_BOUNDING_BOX_RATIO_THRESHOLD,
   TILT_RAW_DETECTION_THRESHOLD,
   nextScanHint,
@@ -149,4 +151,28 @@ test("nextScanHint: pure function — same inputs produce same output, no intern
   const first = nextScanHint(telemetry, state)
   const second = nextScanHint(telemetry, state)
   assert.equal(first, second)
+})
+
+/**
+ * The viewfinder's copy chain (plan 2026-09-05): the idle pill says what the scanner is
+ * doing, the spotted pill asks for the one thing that helps, and the confirm pill no
+ * longer claims a result ("Barcode erkannt") right before an unknown-product sheet.
+ */
+test("scan pill copy: the viewfinder strings are the signed-off German", () => {
+  assert.equal(SCAN_HINT_DEFAULT, "Suche Barcode …")
+  assert.equal(SCAN_HINT_SPOTTED, "Barcode gefunden – kurz stillhalten")
+  assert.equal(SCAN_CONFIRM_LABEL, "Gelesen – wird geprüft")
+})
+
+test("nextScanHint never returns the spotted pill: it is a detection state, not a hint", () => {
+  const candidates = [
+    { ...baseTelemetry },
+    { ...baseTelemetry, meanLuma: 10 },
+    { ...baseTelemetry, meanLuma: 200, rawDetectionsWithoutStableRead: 9 },
+    { ...baseTelemetry, meanLuma: 200, lastBoundingBoxRatio: 0.001 },
+  ] satisfies ScanTelemetry[]
+  for (const telemetry of candidates) {
+    const hint = nextScanHint(telemetry, { currentHint: null, msSinceLastHintChange: 0 })
+    assert.notEqual(hint as string, SCAN_HINT_SPOTTED as string)
+  }
 })

@@ -67,6 +67,12 @@ export const SCAN_DEFERRED_HEADLINE = "Das klären wir noch"
  * it above the category cards — tapping a card submits immediately (no step 2).
  */
 export const SCAN_UNKNOWN_HEADLINE = "Danke dir – das ist neu für uns!"
+/**
+ * The bridge between the viewfinder and this sheet (plan 2026-09-05): the pill said the
+ * barcode was read, and the very next screen says the product is new. Without this line
+ * the two read as a contradiction — with it, "gelesen" and "fehlt noch" are one story.
+ */
+export const SCAN_UNKNOWN_BRIDGE = "Barcode gelesen – das Produkt fehlt noch in unserer Datenbank."
 export const SCAN_UNKNOWN_SUBLINE = "Wir nehmen es auf. Dein Ergebnis kommt in den Chat."
 export const SCAN_UNKNOWN_QUESTION = "Wobei benutzt du es?"
 

@@ -71,6 +71,7 @@ test("initialScanFlowState: starts scanning, live camera, nothing in flight", ()
   assert.deepEqual(initialScanFlowState, {
     step: { kind: "scanning" },
     auxiliary: "none",
+    searchReason: "manual",
     saveOpen: false,
     camera: { status: "live" },
     submitting: false,
@@ -119,7 +120,7 @@ test("resolve_started: taking over from a submit clears the busy flag it superse
 test("resolve_started: without showResolvingImmediately keeps scanning for the confirm window", () => {
   const state = run({ type: "resolve_started", token: 1, showResolvingImmediately: false })
 
-  // The green "✓ Barcode erkannt" moment stays visible; the fetch is already running.
+  // The green "✓ Gelesen – wird geprüft" moment stays visible; the fetch is already running.
   assert.deepEqual(state.step, { kind: "scanning" })
   assert.deepEqual(state.activeRequest, { kind: "resolve", token: 1 })
 })
@@ -352,6 +353,35 @@ test("auxiliary_opened: ignored while a step sheet is already open", () => {
   )
 
   assert.equal(scanFlowReducer(before, { type: "auxiliary_opened", sheet: "search" }), before)
+})
+
+/**
+ * Only the header of the search sheet depends on this, but it has to be the reason the
+ * sheet was ACTUALLY opened with: the 3s timeout pops it while the user is still aiming
+ * at a barcode ("Barcode nicht lesbar?"), a deliberate tap does not.
+ */
+test("auxiliary_opened: the search sheet remembers why it was opened", () => {
+  assert.equal(
+    run({ type: "auxiliary_opened", sheet: "search", searchReason: "timeout" }).searchReason,
+    "timeout",
+  )
+  assert.equal(
+    run({ type: "auxiliary_opened", sheet: "search", searchReason: "camera" }).searchReason,
+    "camera",
+  )
+  // An opening with no stated reason is a deliberate one.
+  assert.equal(run({ type: "auxiliary_opened", sheet: "search" }).searchReason, "manual")
+})
+
+test("auxiliary_opened: the wishlist sheet never rewrites the search reason", () => {
+  const state = run(
+    { type: "auxiliary_opened", sheet: "search", searchReason: "timeout" },
+    { type: "auxiliary_closed" },
+    { type: "auxiliary_opened", sheet: "wishlist" },
+  )
+
+  assert.equal(state.auxiliary, "wishlist")
+  assert.equal(state.searchReason, "timeout")
 })
 
 test("auxiliary_closed: returns to no auxiliary sheet without touching the step", () => {

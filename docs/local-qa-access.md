@@ -80,8 +80,15 @@ page fabricates its own scenario. Useful ones under `src/app/labs/`:
   makes the next camera acquisition fail, `stall()` kills the live stream, `startCamera()`
   releases a camera held by the `__SCAN_LAB_HOLD_CAMERA` boot flag, `holdDetection()` /
   `releaseDetection()` freeze one detection cycle mid-await (so a decode can be made to
-  land while a sheet is open), and `events` /
-  `transitions` / `state` expose what the flow tracked and where it is. The `/api/scan/*`
+  land while a sheet is open), `spot("4006381333931", "4006381333955")` holds the
+  viewfinder's amber "spotted" state indefinitely (the value alternates, so the two
+  consecutive matches a stable read needs never happen — `emit(value, 1)` cannot do this,
+  its resting frame decodes on the very next cycle), and `events` /
+  `transitions` / `state` expose what the flow tracked and where it is. `state.detection`
+  (and the `detection` field on every entry in `transitions`) is what the VIEWFINDER is
+  drawing — `searching` / `spotted` / `read` — read off the scanner root's
+  `data-scan-detection`, so a state that only lasts a frame is still assertable from the
+  transition history afterwards. The `/api/scan/*`
   calls are NOT mocked by the page — without a signed-in session every resolve fails, so
   for anything past the decode either use the dev login (§1) or intercept the routes the
   way `tests/scan-flow.spec.ts` does.

@@ -1,4 +1,9 @@
-import type { ScanHint } from "@/lib/scan/guidance"
+import {
+  SCAN_CONFIRM_LABEL,
+  SCAN_HINT_DEFAULT,
+  SCAN_HINT_SPOTTED,
+  type ScanHint,
+} from "@/lib/scan/guidance"
 
 /**
  * All mutable, per-scan-session state the scan loop tracks between camera start and
@@ -263,4 +268,295 @@ export function shouldFireTimeout(
   if (session.activeMs < timeoutMs) return false
   session.timeoutFired = true
   return true
+}
+
+/* --------------------------------------------------------------------------
+ * Viewfinder detection state (plan 2026-09-05, Task 1)
+ *
+ * A reporting seam, not a lifecycle: the detection loop already knows whether a barcode
+ * is in frame and where, and these helpers turn that into the three states the
+ * viewfinder draws — searching, spotted (amber outline), read (green outline). Pure on
+ * purpose, so the transitions and the on-screen geometry are testable without a camera.
+ * ------------------------------------------------------------------------ */
+
+/** A box in 0..1 fractions of the video's *intrinsic* size (not the element's). */
+export type NormalizedBox = { x: number; y: number; width: number; height: number }
+
+export type ScanDetectionState =
+  | { kind: "searching" }
+  | { kind: "spotted"; box: NormalizedBox }
+  | { kind: "read"; box: NormalizedBox }
+
+/** What the detection loop just observed. `emptyStreak` decides what `empty` means. */
+export type ScanDetectionEvent =
+  | { kind: "raw"; box: NormalizedBox }
+  | { kind: "read"; box: NormalizedBox }
+  | { kind: "empty" }
+  | { kind: "restart" }
+
+const SEARCHING: ScanDetectionState = { kind: "searching" }
+
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) return 0
+  if (value < 0) return 0
+  if (value > 1) return 1
+  return value
+}
+
+/**
+ * A detector bounding box (pixels of the video's intrinsic frame) as 0..1 fractions,
+ * clamped into the frame — a barcode half out of shot must not draw an outline hanging
+ * outside the viewfinder. A frame with no intrinsic size yet yields a zero box, which
+ * the caller treats as "nothing to draw".
+ */
+export function normalizeDetectionBox(
+  boundingBox: { x: number; y: number; width: number; height: number },
+  videoWidth: number,
+  videoHeight: number,
+): NormalizedBox {
+  if (!(videoWidth > 0) || !(videoHeight > 0)) return { x: 0, y: 0, width: 0, height: 0 }
+  const x = clamp01(boundingBox.x / videoWidth)
+  const y = clamp01(boundingBox.y / videoHeight)
+  return {
+    x,
+    y,
+    width: Math.min(clamp01(boundingBox.width / videoWidth), 1 - x),
+    height: Math.min(clamp01(boundingBox.height / videoHeight), 1 - y),
+  }
+}
+
+/**
+ * The periodic rotated retry (`getRotatedFrame`) hands the detector a canvas turned 90°,
+ * so its boxes are in the ROTATED frame's coordinates. The rotation maps a video point
+ * (x, y) to (videoHeight - y, x); this is the inverse for a whole box, so a barcode found
+ * on a vertically-held bottle still gets its outline drawn where the barcode actually is.
+ */
+export function unrotateDetectionBox(
+  box: { x: number; y: number; width: number; height: number },
+  videoHeight: number,
+): { x: number; y: number; width: number; height: number } {
+  return {
+    x: box.y,
+    y: videoHeight - box.x - box.width,
+    width: box.height,
+    height: box.width,
+  }
+}
+
+/**
+ * Where a normalized box lands inside an element rendering the video with
+ * `object-fit: cover` (centred, cropped on whichever axis overflows). Returns CSS pixels
+ * relative to the element's own box; a coordinate may be negative or past the element's
+ * edge when that part of the frame is cropped away, which is correct — the overlay is
+ * clipped by the viewfinder's `overflow-hidden`.
+ */
+export function mapBoxToCover(
+  box: NormalizedBox,
+  video: { width: number; height: number },
+  element: { width: number; height: number },
+): { left: number; top: number; width: number; height: number } {
+  if (!(video.width > 0) || !(video.height > 0)) return { left: 0, top: 0, width: 0, height: 0 }
+  if (!(element.width > 0) || !(element.height > 0)) {
+    return { left: 0, top: 0, width: 0, height: 0 }
+  }
+  const scale = Math.max(element.width / video.width, element.height / video.height)
+  const displayedWidth = video.width * scale
+  const displayedHeight = video.height * scale
+  const offsetX = (element.width - displayedWidth) / 2
+  const offsetY = (element.height - displayedHeight) / 2
+  return {
+    left: offsetX + box.x * displayedWidth,
+    top: offsetY + box.y * displayedHeight,
+    width: box.width * displayedWidth,
+    height: box.height * displayedHeight,
+  }
+}
+
+/** What the viewfinder is drawing right now — the three detection kinds, rendered. */
+export type ScanVisualState = ScanDetectionState["kind"]
+
+/** Everything the viewfinder needs to draw itself, derived from the reported state. */
+export type ViewfinderPresentation = {
+  visual: ScanVisualState
+  /** The box to outline, still normalised; `null` draws no outline at all. */
+  outlineBox: NormalizedBox | null
+  /**
+   * The loop is paused behind a sheet and the confirm window is over: everything the
+   * viewfinder shows is stale, so it goes static.
+   */
+  frozen: boolean
+}
+
+function detectionBoxOf(state: ScanDetectionState): NormalizedBox | null {
+  return state.kind === "searching" ? null : state.box
+}
+
+/**
+ * What the viewfinder draws, from what the loop reported plus the two states the
+ * component owns. Pure so the three-way derivation is testable without a camera:
+ *
+ * - the 400ms confirm window owns the `read` look, because the barcode is usually still
+ *   in frame while the result sheet rises and the loop keeps reporting `spotted` — the
+ *   user would otherwise see the green moment flicker back to amber;
+ * - a sheet over a paused loop falls back to a STATIC searching look rather than
+ *   freezing an amber "hold still" over a picture nobody can see. The confirm window is
+ *   exempt: that is exactly the moment the sheet rises over.
+ */
+export function deriveViewfinderPresentation(input: {
+  detection: ScanDetectionState
+  /**
+   * The box the loop reported with the accepted decode, captured when the `read` arrived.
+   * The confirm window draws THIS box for its whole duration: the loop keeps running
+   * behind it, so the live box may already describe a wobble the user made while the
+   * sheet was rising — or be gone entirely.
+   */
+  confirmBox: NormalizedBox | null
+  confirmActive: boolean
+  detectionPaused: boolean
+}): ViewfinderPresentation {
+  const { detection, confirmBox, confirmActive, detectionPaused } = input
+  const frozen = detectionPaused && !confirmActive
+  if (confirmActive) {
+    return { visual: "read", outlineBox: confirmBox ?? detectionBoxOf(detection), frozen }
+  }
+  if (frozen) return { visual: "searching", outlineBox: null, frozen }
+  return { visual: detection.kind, outlineBox: detectionBoxOf(detection), frozen }
+}
+
+/**
+ * The viewfinder's state machine. Deliberately mirrors the D6 re-arm the session already
+ * runs on: the outline is only dropped once `REARM_EMPTY_DETECTIONS` attempts in a row
+ * saw no barcode at all, so a single missed decode on a still-held bottle does not make
+ * the outline flicker.
+ */
+export function nextDetectionState(
+  previous: ScanDetectionState,
+  event: ScanDetectionEvent,
+  emptyStreak: number,
+  rearmAfter: number = REARM_EMPTY_DETECTIONS,
+): ScanDetectionState {
+  switch (event.kind) {
+    case "raw":
+      return { kind: "spotted", box: event.box }
+    case "read":
+      return { kind: "read", box: event.box }
+    case "restart":
+      return SEARCHING
+    case "empty":
+      return emptyStreak >= rearmAfter ? SEARCHING : previous
+  }
+}
+
+/**
+ * Which viewfinder event a change to the sheet pause produces. Leaving the pause is the
+ * only transition that carries one: the loop stopped looking while the sheet was up, so
+ * whatever it last reported describes a frame from before — the bottle may have been put
+ * down, turned round or swapped since. The viewfinder goes back to `searching` BEFORE
+ * the loop resumes, so the first thing the user sees on a reopened viewfinder is never a
+ * stale amber outline. Entering the pause reports nothing: the component already draws
+ * the static searching look for the duration (see `deriveViewfinderPresentation`).
+ */
+export function detectionEventForPauseChange(
+  wasPaused: boolean,
+  paused: boolean,
+): ScanDetectionEvent | null {
+  return wasPaused && !paused ? { kind: "restart" } : null
+}
+
+/**
+ * How far a box edge has to move before the UI is told about it, as a fraction of the
+ * frame. Detector boxes jitter every frame on a bottle that is being held still; half a
+ * percent of the frame is well under what the eye reads as a moving outline, and well
+ * over the jitter — the outline follows real movement through its CSS transition instead
+ * of re-rendering on noise.
+ */
+export const BOX_MOVE_TOLERANCE = 0.005
+
+/**
+ * Whether two states are the same as far as the UI is concerned. This is what keeps the
+ * reporting seam off React's render path: the loop runs at frame rate, and a static
+ * barcode must not cause a `setState` per frame.
+ *
+ * Boxes are compared by ABSOLUTE delta, not by rounding each component into a bucket:
+ * a bucketed comparison calls a 0.00002 wobble a move whenever it happens to straddle a
+ * bucket edge, and calls a 0.0049 jump nothing whenever it does not. The caller always
+ * compares against the box it LAST REPORTED (the hook holds that reference), so the
+ * pairwise comparison is not asked to be transitive — a slow drift accumulates against
+ * the reported box and is reported the moment it has really moved half a percent.
+ */
+export function isSameDetectionState(a: ScanDetectionState, b: ScanDetectionState): boolean {
+  if (a.kind !== b.kind) return false
+  if (a.kind === "searching" || b.kind === "searching") return true
+  return (
+    withinBoxTolerance(a.box.x, b.box.x) &&
+    withinBoxTolerance(a.box.y, b.box.y) &&
+    withinBoxTolerance(a.box.width, b.box.width) &&
+    withinBoxTolerance(a.box.height, b.box.height)
+  )
+}
+
+function withinBoxTolerance(a: number, b: number): boolean {
+  return Math.abs(a - b) <= BOX_MOVE_TOLERANCE
+}
+
+/**
+ * What the viewfinder's polite live region should say, and what it has already said this
+ * scan attempt. The visual pill and the announced text are deliberately NOT the same
+ * thing: the pill flips as fast as the detector does, and a screen reader that reads
+ * every flip out loud makes the scanner unusable.
+ */
+export type ViewfinderAnnouncementState = {
+  /** The text the live region holds. */
+  announcement: string
+  /** "Barcode gefunden" is worth saying once per attempt, not once per flicker. */
+  spottedAnnounced: boolean
+  /** Neither is the fall back to "Suche Barcode …". */
+  searchingAnnounced: boolean
+}
+
+/**
+ * The state every scan attempt starts from. The idle hint is already in the region
+ * rather than announced into it: a polite live region does not read its initial
+ * content, so the first thing a user hears is a real change.
+ */
+export const INITIAL_VIEWFINDER_ANNOUNCEMENT: ViewfinderAnnouncementState = {
+  announcement: SCAN_HINT_DEFAULT,
+  spottedAnnounced: false,
+  searchingAnnounced: false,
+}
+
+/**
+ * The announcement policy. Pure, and separate from the rate limit that drives it (the
+ * component decides WHEN this runs; this decides WHAT is worth saying):
+ *
+ * - an accepted decode always announces — it is the one moment the user must not miss;
+ * - a situational hint ("Mehr Licht hilft") always announces — it asks for an action;
+ * - the `spotted` / `searching` flip announces once each per attempt, so a barcode at
+ *   the edge of readability cannot turn the live region into a metronome.
+ */
+export function nextViewfinderAnnouncement(
+  previous: ViewfinderAnnouncementState,
+  input: { visual: ScanVisualState; hint: ScanHint },
+): ViewfinderAnnouncementState {
+  const { visual, hint } = input
+  if (visual === "read") {
+    return previous.announcement === SCAN_CONFIRM_LABEL
+      ? previous
+      : { ...previous, announcement: SCAN_CONFIRM_LABEL }
+  }
+  if (visual === "spotted") {
+    if (previous.spottedAnnounced) return previous
+    return { ...previous, announcement: SCAN_HINT_SPOTTED, spottedAnnounced: true }
+  }
+  if (hint !== SCAN_HINT_DEFAULT) {
+    return previous.announcement === hint ? previous : { ...previous, announcement: hint }
+  }
+  if (previous.searchingAnnounced) return previous
+  // The candidate text is identical to what the region already holds — most often the
+  // very first publish, which fires with the initial "searching" + default hint state it
+  // already started from. Spending the once-per-attempt budget here would mean nothing
+  // was ever actually said, and the real flip back to idle (after a spotted/read
+  // announcement) would then find the budget gone and get stuck on stale text.
+  if (previous.announcement === hint) return previous
+  return { ...previous, announcement: hint, searchingAnnounced: true }
 }

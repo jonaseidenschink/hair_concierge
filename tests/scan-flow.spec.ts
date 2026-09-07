@@ -1,5 +1,8 @@
 import { expect, test, type Page } from "@playwright/test"
 
+import { SCAN_CONFIRM_LABEL, SCAN_HINT_DEFAULT, SCAN_HINT_SPOTTED } from "../src/lib/scan/guidance"
+import { SCAN_UNKNOWN_BRIDGE, SCAN_UNKNOWN_SUBLINE } from "../src/lib/scan/verdict-labels"
+
 import {
   EAN_PRODUCT_A,
   EAN_PRODUCT_B,
@@ -194,6 +197,37 @@ async function emitNone(page: Page, times = 3): Promise<void> {
   await page.evaluate((count) => window.__scanLab?.emitNone(count), times)
 }
 
+/**
+ * Hold the viewfinder in "spotted": a barcode is in frame on every detection, but the
+ * value alternates, so the two consecutive matches a stable read needs never happen.
+ * `emit(value, 1)` cannot stand in for this — the lab's resting frame answers the same
+ * value on the very next cycle and the barcode decodes.
+ */
+async function spot(page: Page, first: string, second: string): Promise<void> {
+  await page.evaluate(({ first: a, second: b }) => window.__scanLab?.spot(a, b), {
+    first,
+    second,
+  })
+}
+
+/** The scanner root, which carries what the viewfinder is drawing. */
+function viewfinder(page: Page) {
+  return page.locator("[data-scan-detection]")
+}
+
+/** The box drawn over the barcode the loop can see; absent while searching. */
+function outline(page: Page) {
+  return page.locator("[data-scan-outline]")
+}
+
+/**
+ * The viewfinder's hint / spotted / confirm pill — the VISIBLE one. The accessible copy
+ * lives in `[data-scan-announcement]`, which is rate-limited and deliberately lags.
+ */
+function pill(page: Page) {
+  return page.locator("[data-scan-detection] [data-scan-pill]")
+}
+
 async function labState(page: Page) {
   const state = await page.evaluate(() => window.__scanLab?.state ?? null)
   if (!state) throw new Error("scan lab: the flow root carries no debug state")
@@ -253,7 +287,7 @@ test.describe("/scan client flow (fake camera + fake detector)", () => {
 
     // Started before the emit so the poll is already running when the 400ms window opens.
     const confirmSeen = page.waitForFunction(
-      () => document.body.textContent?.includes("✓ Barcode erkannt") ?? false,
+      () => document.body.textContent?.includes("✓ Gelesen – wird geprüft") ?? false,
       undefined,
       { polling: "raf", timeout: 10_000 },
     )
@@ -581,5 +615,126 @@ test.describe("/scan client flow (fake camera + fake detector)", () => {
       (sample) => sample.step === "scanning" && sample.calls === 1 && sample.alerts === 1,
       2_500,
     )
+  })
+
+  test("viewfinder: searching → spotted → read", async ({ page }) => {
+    await installScanApi(page)
+    await openLab(page)
+    await waitForScanningLoop(page)
+
+    // Nothing in frame yet: the idle pill, and no box drawn over anything.
+    await expect(viewfinder(page)).toHaveAttribute("data-scan-detection", "searching")
+    await expect(pill(page)).toHaveText(SCAN_HINT_DEFAULT)
+    await expect(outline(page)).toHaveCount(0)
+
+    // A barcode the loop can see but not yet read.
+    await spot(page, EAN_PRODUCT_A, EAN_PRODUCT_B)
+    await expect(viewfinder(page)).toHaveAttribute("data-scan-detection", "spotted")
+    await expect(pill(page)).toHaveText(SCAN_HINT_SPOTTED)
+    await expect(outline(page)).toBeVisible()
+
+    // It holds still: two consecutive reads of the same value, and the decode lands.
+    // The confirm poll starts BEFORE the emit, so the 400ms window is observed, not raced.
+    const confirmSeen = page.waitForFunction(
+      (label: string) => document.body.textContent?.includes(label) ?? false,
+      `✓ ${SCAN_CONFIRM_LABEL}`,
+      { polling: "raf", timeout: 10_000 },
+    )
+    await emit(page, EAN_PRODUCT_A)
+    await confirmSeen
+    await expect(flowRoot(page)).toHaveAttribute("data-scan-step", "result")
+    await expect(page.getByText("Lab Shampoo Alpha")).toBeVisible()
+
+    // The states came in the right order. Read from the recorded history rather than the
+    // live DOM: "read" only lasts the 400ms confirm window, and racing it is the one
+    // thing this spec's transition log exists to avoid.
+    const seen = await page.evaluate(() =>
+      (window.__scanLab?.transitions ?? []).map((transition) => transition.detection),
+    )
+    expect(seen).toContain("spotted")
+    expect(seen).toContain("read")
+    expect(seen.indexOf("searching")).toBeLessThan(seen.indexOf("spotted"))
+    expect(seen.indexOf("spotted")).toBeLessThan(seen.indexOf("read"))
+  })
+
+  test("viewfinder: spotted clears once the barcode leaves the frame", async ({ page }) => {
+    await installScanApi(page)
+    await openLab(page)
+    await waitForScanningLoop(page)
+
+    await spot(page, EAN_PRODUCT_A, EAN_PRODUCT_B)
+    await expect(viewfinder(page)).toHaveAttribute("data-scan-detection", "spotted")
+    await expect(outline(page)).toBeVisible()
+
+    // The bottle is moved away: the D6 re-arm drops the outline with it.
+    await emitNone(page, 4)
+    await expect(viewfinder(page)).toHaveAttribute("data-scan-detection", "searching")
+    await expect(outline(page)).toHaveCount(0)
+  })
+
+  test("viewfinder: the search fallback never leaves a frozen spotted state behind", async ({
+    page,
+  }) => {
+    await installScanApi(page)
+    await openLab(page)
+    await waitForScanningLoop(page)
+
+    // A barcode that is seen on every single detection and never reads — exactly the
+    // situation the 3s fallback exists for.
+    await spot(page, EAN_PRODUCT_A, EAN_PRODUCT_B)
+    await expect(viewfinder(page)).toHaveAttribute("data-scan-detection", "spotted")
+
+    await expect(flowRoot(page)).toHaveAttribute("data-scan-auxiliary", "search", {
+      timeout: 8_000,
+    })
+    await expect(page.getByRole("heading", { name: "Barcode nicht lesbar?" })).toBeVisible()
+
+    // The sheet covers the camera and the loop is paused, so the amber "hold still" must
+    // not be frozen underneath it — even though the barcode is still in front of the lens.
+    await expectStable(
+      async () => ({
+        detection: (await labState(page)).detection,
+        outlines: await outline(page).count(),
+      }),
+      (sample) => sample.detection === "searching" && sample.outlines === 0,
+      1_000,
+    )
+  })
+
+  test("copy: the unknown sheet bridges from the read barcode to the missing product", async ({
+    page,
+  }) => {
+    await installScanApi(page)
+    await openLab(page)
+    await waitForScanningLoop(page)
+
+    await emit(page, EAN_UNKNOWN)
+    await expect(flowRoot(page)).toHaveAttribute("data-scan-step", "unknown")
+
+    await expect(page.getByText(SCAN_UNKNOWN_BRIDGE)).toBeVisible()
+    await expect(page.getByText(SCAN_UNKNOWN_SUBLINE)).toBeVisible()
+    // The bridge line comes first: read the barcode, then what is missing about it.
+    const order = await page.evaluate(
+      ({ bridge, subline }) => {
+        const text = document.body.textContent ?? ""
+        return { bridge: text.indexOf(bridge), subline: text.indexOf(subline) }
+      },
+      { bridge: SCAN_UNKNOWN_BRIDGE, subline: SCAN_UNKNOWN_SUBLINE },
+    )
+    expect(order.bridge).toBeGreaterThanOrEqual(0)
+    expect(order.bridge).toBeLessThan(order.subline)
+  })
+
+  test("copy: a search sheet the user opened keeps the neutral title", async ({ page }) => {
+    await installScanApi(page)
+    await openLab(page)
+    await waitForScanningLoop(page)
+
+    await page.getByRole("button", { name: "Produkt suchen" }).click()
+    await expect(flowRoot(page)).toHaveAttribute("data-scan-auxiliary", "search")
+
+    // Nothing failed to read here — the user simply asked for the search.
+    await expect(page.getByRole("heading", { name: "Ohne Scan finden" })).toBeVisible()
+    await expect(page.getByRole("heading", { name: "Barcode nicht lesbar?" })).toHaveCount(0)
   })
 })

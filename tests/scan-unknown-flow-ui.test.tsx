@@ -130,6 +130,22 @@ test("ScanUnknownFlow: renders the signed-off headline and question verbatim", (
   assert.match(markup, /Wobei benutzt du es\?/)
 })
 
+/**
+ * The viewfinder just said "✓ Gelesen – wird geprüft" and this sheet says the product is
+ * new: without the bridge line the two read as a contradiction (Nick's phone test,
+ * plan 2026-09-05). It has to sit between the headline and the existing subline.
+ */
+test("ScanUnknownFlow: the bridge line sits under the headline, above the subline", () => {
+  const tree = renderFlow({ submitting: false, onSubmit: () => undefined })
+  const markup = renderToStaticMarkup(tree.value)
+  assert.match(markup, /Barcode gelesen – das Produkt fehlt noch in unserer Datenbank\./)
+
+  const headline = markup.indexOf("Danke dir")
+  const bridge = markup.indexOf("Barcode gelesen")
+  const subline = markup.indexOf("Wir nehmen es auf")
+  assert.ok(headline >= 0 && bridge > headline && subline > bridge, markup)
+})
+
 test("ScanUnknownFlow: renders no brand or product-name inputs (step 2 is gone)", () => {
   const tree = renderFlow({ submitting: false, onSubmit: () => undefined })
   const inputs = findAll(tree.value, (element) => element.type === "input")
