@@ -18,7 +18,7 @@ export type PremiumFeatureId =
 
 export interface PremiumSheetContext {
   feature: PremiumFeatureId
-  /** Free-form surface identifier, e.g. "scan-verdict", "nav-tab", "profil". */
+  /** Free-form surface identifier, e.g. "scan:verdict", "nav-tab", "profil". */
   source: string
 }
 

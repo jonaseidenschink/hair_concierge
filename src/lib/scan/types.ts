@@ -47,14 +47,24 @@ export type ScanAlternative = {
   netContentLabel: string | null
   verdict: Extract<ScanVerdict, "ideal" | "supportive">
   verdictLabel: string
+  /**
+   * Server-internal only (T8): the candidate's already-computed fit criteria, carried
+   * through so the free-tier masked serializer (`masked-alternative.ts`) can derive
+   * comparison rows without re-evaluating fit. Never reaches the wire — both
+   * `ScanAlternativePresentation` below and the masked shape explicitly leave it off their
+   * own field lists, so a stray leak here is a compile error, not a runtime one.
+   */
+  criteria?: readonly Stage3CriterionResult[]
 }
 
 /**
  * Commerce/identity fields the verdict core cannot know: `buildScanVerdict` works on
  * authority facts, which deliberately carry no brand and no purchase link. The resolve
- * route joins them on from the catalog row (see `product-presentation.ts`).
+ * route joins them on from the catalog row (see `product-presentation.ts`). `criteria` is
+ * explicitly omitted (see `ScanAlternative` above) — it never reached the wire before T8
+ * and must not start now, so the full/premium shape stays byte-identical.
  */
-export type ScanAlternativePresentation = ScanAlternative & {
+export type ScanAlternativePresentation = Omit<ScanAlternative, "criteria"> & {
   brand: string | null
   purchaseUrl: string | null
 }
@@ -131,7 +141,13 @@ export type ScanPresentedVerdictPayload =
   | ScanNotNeededVerdictPayload
 
 /**
- * The three shapes `POST /api/scan/resolve` can return. The two verdict payloads above
+ * The three FULL shapes `POST /api/scan/resolve` can return. Since T8 the route has a
+ * fourth, free-tier-only branch — `ScanMaskedVerdictResult` (`masked-alternative.ts`) —
+ * which is deliberately not a member here, so nothing that consumes this union can read
+ * an identity field off a masked alternative. The client-side union covering both tiers
+ * is `ScanClientResolveResult` in `verdict-access.ts`.
+ *
+ * The two verdict payloads above
  * gain `product` (the scanned catalog row as the header/footer render it),
  * `snapshotSource` (which profile snapshot the verdict was evaluated against — see
  * `ScanEvaluationContext`) and `savedState` (merkliste/routine/neither, plus whether the

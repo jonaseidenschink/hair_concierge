@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState } from "react"
 
+import { PremiumSheet } from "@/components/premium-sheet/premium-sheet"
 import { Skeleton } from "@/components/ui/skeleton"
+import type { PremiumSheetContext } from "@/lib/premium-sheet/context"
 import {
   noOpScanAnalytics,
   scanResultShownInCatalog,
@@ -12,6 +14,8 @@ import {
   initialScanFlowState,
   isDetectionPaused,
   scanFlowReducer,
+  scanRevealAnimates,
+  scanRevealedAlternatives,
   type ScanFlowState,
   type ScanFlowStep,
 } from "@/lib/scan/scan-flow-state"
@@ -19,9 +23,25 @@ import { useLatestRequest } from "@/lib/scan/use-latest-request"
 import {
   SCAN_RESOLVING_SUBLINE,
   SCAN_RESOLVING_TITLE,
+  SCAN_REVEAL_EMPTY_NOTICE,
   SCAN_UNKNOWN_HEADLINE,
 } from "@/lib/scan/verdict-labels"
-import type { ScanResolveResult, ScanResolvedVerdictResult } from "@/lib/scan/types"
+import {
+  isMaskedScanVerdict,
+  type ScanClientResolveResult,
+  type ScanVerdictResult,
+} from "@/lib/scan/verdict-access"
+import type { EntitlementTier } from "@/lib/entitlements"
+import type { ScanAlternativePresentation } from "@/lib/scan/types"
+import {
+  createBrowserScanLocalStorage,
+  createBrowserScanSessionStorage,
+  readScanFatigueBudget,
+  recordScanSession,
+  writeScanFatigueBudget,
+  type ScanTriggerStorage,
+} from "@/lib/scan/triggers/session-marker"
+import { scanTriggerSheetContext } from "@/lib/scan/triggers/trigger-rules"
 // The app-wide provider is `providers/toast-provider` (mounted in AppRouteProviders);
 // `components/ui/toast`'s hook talks to a second, unmounted store and would no-op.
 import { useToast } from "@/providers/toast-provider"
@@ -31,6 +51,7 @@ import { ScanResultCard } from "./scan-result-card"
 import { ScanResultSheet } from "./scan-result-sheet"
 import { ScanSaveSheet, type ScanSaveCompletion } from "./scan-save-sheet"
 import { ScanSearchSheet } from "./scan-search-sheet"
+import { ScanCategoryRepeatCard, ScanProactiveTriggerCard } from "./scan-trigger-cards"
 import { ScanUnknownFlow, type ScanSubmissionInput } from "./scan-unknown-flow"
 import { ScanWishlistSheet, ScanWishlistTrigger } from "./scan-wishlist-sheet"
 import {
@@ -67,6 +88,29 @@ const RESOLVE_ERRORS: Record<string, string> = {
 }
 const GENERIC_ERROR = "Hat nicht geklappt – versuch's nochmal."
 
+/** Free-tier gates on this surface all open the same sheet (T5 opener contract). */
+const SCAN_VERDICT_SOURCE = "scan:verdict"
+const MERKLISTE_GATE: PremiumSheetContext = { feature: "merkliste", source: SCAN_VERDICT_SOURCE }
+const EMPFEHLUNGEN_GATE: PremiumSheetContext = {
+  feature: "empfehlungen",
+  source: SCAN_VERDICT_SOURCE,
+}
+
+/**
+ * T10's user-initiated gate 2 always maps to the same context — resolved once at module
+ * scope (mirrors `MERKLISTE_GATE`/`EMPFEHLUNGEN_GATE` above) so the render path never
+ * needs to assert away `scanTriggerSheetContext`'s nullable return.
+ */
+const ZWEI_SCANS_GATE: PremiumSheetContext = requireScanTriggerSheetContext(
+  "zwei_scans_gleiche_kategorie",
+)
+
+function requireScanTriggerSheetContext(id: Parameters<typeof scanTriggerSheetContext>[0]) {
+  const context = scanTriggerSheetContext(id)
+  if (!context) throw new Error(`scan trigger "${id}" is missing its sheet context`)
+  return context
+}
+
 /** Why the viewfinder is replaced by the fallback tile. */
 type ScanCameraTileReason = ScanUnavailableReason | "stalled"
 
@@ -98,11 +142,35 @@ const CAMERA_RETRY_LABEL: Record<ScanCameraTileReason, string | null> = {
  *
  * `scannerRuntime` is the camera/detector test seam handed straight to `<Scanner>`; the
  * labs harness supplies it, production leaves it undefined.
+ *
+ * `tier` (fix round 1, F1) is the SERVER-derived signal — `/scan/page.tsx` loads it from
+ * `loadAuthenticatedAppNavigationAccess()`, the same source T3's nav lock markers use,
+ * which fails closed to `"premium"` — never a client-side entitlement guess. It is what
+ * lets the header Merken bookmark lock from the very first paint, before any verdict has
+ * proven the tier from a response shape; `state.tier` (learned from the resolve responses
+ * themselves) still takes over independently once it has evidence, so a degraded nav
+ * loader can never unlock a free user either. Omitted, it changes nothing: every existing
+ * caller (tests, the labs harness without a tier boot flag) keeps today's behaviour.
+ *
+ * `sessionRecordStorage`/`fatigueStorage` (T10; split in fix round 1, F1) are the trigger
+ * layer's two test seams, same idea as `scannerRuntime`: production leaves both undefined
+ * (the real `localStorage`/`sessionStorage` adapters are used), tests inject memory stores
+ * — pre-seeded to simulate a returning session, or shared across two mounts to prove the
+ * fatigue budget survives a remount.
  */
 export function ScanFlow({
   analytics = noOpScanAnalytics,
   scannerRuntime,
-}: { analytics?: ScanAnalyticsPort; scannerRuntime?: ScannerRuntime } = {}) {
+  tier,
+  sessionRecordStorage,
+  fatigueStorage,
+}: {
+  analytics?: ScanAnalyticsPort
+  scannerRuntime?: ScannerRuntime
+  tier?: EntitlementTier
+  sessionRecordStorage?: ScanTriggerStorage
+  fatigueStorage?: ScanTriggerStorage
+} = {}) {
   const { toast } = useToast()
   const [state, dispatch] = useReducer(scanFlowReducer, initialScanFlowState)
   const requests = useLatestRequest()
@@ -144,6 +212,29 @@ export function ScanFlow({
    * with no such window.
    */
   const resolveInFlightRef = useRef(false)
+  /**
+   * The Wiederkehrer trigger's "second session" input (T10; fix round 1, F4): set once,
+   * from the localStorage session record, on mount — before any resolve can complete — so
+   * `resolve()` below always reads a settled value rather than racing the effect. `1` (a
+   * device's first-ever visit, which can never equal the required session number 2) is the
+   * safe default for SSR, for a premium/flag-off mount that skips the read entirely (F5),
+   * and for a storage read that fails.
+   */
+  const sessionNumberRef = useRef(1)
+  /**
+   * PR2 review fix (C2): mints a token per `revealAlternatives` call, independent of
+   * `requests` (which only arbitrates resolve/submit). Two reveal attempts can legitimately
+   * overlap for the SAME product — e.g. the F2 silent background re-serve still in flight
+   * when a rescan of that same product starts another one — and product identity alone
+   * (`ownsResultProduct`) cannot tell an older call's outcome from a newer one's. See
+   * `scan-flow-state.ts`'s `ScanRevealState`/`ownsRevealToken`.
+   */
+  const revealTokenRef = useRef(0)
+  /**
+   * PR2 review fix (C3): guards `hydrateFatigueBudget` below so it runs at most once per
+   * mount, regardless of which of its two call sites reaches it first.
+   */
+  const fatigueHydratedRef = useRef(false)
 
   const clearSheetTimer = useCallback(() => {
     if (sheetTimerRef.current !== null) window.clearTimeout(sheetTimerRef.current)
@@ -154,6 +245,60 @@ export function ScanFlow({
     scanSessionStartRef.current = performance.now()
     analytics.track("scan_started", {})
   }, [analytics])
+
+  /**
+   * Fix round 1 (F5): both trigger-layer storages are read ONLY once free tier is
+   * confirmed, so premium and flag-off users cause zero storage activity, not merely zero
+   * rendered surfaces. Guarded by `fatigueHydratedRef` to run at most once per mount.
+   *
+   * Fix round 1 (F1): also re-seeds the reducer's fatigue budget from `sessionStorage` via
+   * `fatigue_hydrated`, before any resolve can land — see that action's doc for why a plain
+   * ref cannot do this (the flag lives in reducer state, not just this closure).
+   *
+   * PR2 review fix (C3): free tier can be established from TWO independent sources — the
+   * server-derived `tier` prop (checked by the mount effect below, unchanged from fix round
+   * 1) OR a masked resolve response proving it later, when a degraded nav loader defaulted
+   * `tier` to `"premium"` (its own fail-closed default) and only the response shape reveals
+   * the truth. Before this fix, that second path never hydrated the persisted fatigue
+   * budget at all: the mount effect's `tier !== "free"` guard skipped it forever, so a
+   * pitch already spent in an earlier mount (persisted to `sessionStorage`) went unread and
+   * a second proactive pitch could fire in what is really the same fatigue-budget session.
+   * `resolve()`'s success handler below now also calls this, synchronously, BEFORE
+   * dispatching `resolved` — the action whose reducer case actually evaluates this verdict's
+   * trigger against the budget — so the hydrated value is always in place before it is used.
+   */
+  const hydrateFatigueBudget = useCallback(() => {
+    if (fatigueHydratedRef.current) return
+    fatigueHydratedRef.current = true
+    sessionNumberRef.current = recordScanSession(
+      sessionRecordStorage !== undefined ? sessionRecordStorage : createBrowserScanLocalStorage(),
+    )
+    const hydratedFatigue = readScanFatigueBudget(
+      fatigueStorage !== undefined ? fatigueStorage : createBrowserScanSessionStorage(),
+    )
+    if (hydratedFatigue) dispatch({ type: "fatigue_hydrated", id: hydratedFatigue })
+  }, [fatigueStorage, sessionRecordStorage])
+
+  useEffect(() => {
+    if (tier !== "free") return
+    hydrateFatigueBudget()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  /**
+   * Fix round 1 (F1): the write side of the fatigue budget — persists the session's one
+   * spent pitch to `sessionStorage` so a later remount's read above can find it.
+   * `state.proactiveTriggerShown` can only ever become non-null once a resolve's own
+   * `effectiveTier` (below) was already free (see `resolveGatedProactiveScanTrigger`'s
+   * gate), so this needs no additional tier check to satisfy F5.
+   */
+  useEffect(() => {
+    if (state.proactiveTriggerShown === null) return
+    writeScanFatigueBudget(
+      fatigueStorage !== undefined ? fatigueStorage : createBrowserScanSessionStorage(),
+      state.proactiveTriggerShown,
+    )
+  }, [state.proactiveTriggerShown, fatigueStorage])
 
   // Unmount only: never leave a sheet timer pointing at a dead component.
   useEffect(() => clearSheetTimer, [clearSheetTimer])
@@ -176,6 +321,70 @@ export function ScanFlow({
     scanSessionStartRef.current = performance.now()
     analytics.track("scan_started", {})
   }, [analytics, clearSheetTimer, requests])
+
+  /**
+   * The free tier's one-lifetime reveal (T9), against T8's `POST /api/scan/reveal`. The
+   * body carries the SCANNED product's id — masked alternatives have no id to round-trip
+   * — and the reducer drops the answer unless that product is still on screen.
+   *
+   * The three outcomes the endpoint's contract asks the UI to tell apart:
+   * - `200` with alternatives → the full card (animated for an explicit tap, already sharp
+   *   for the `silent` background re-serve below — fix round 1, F2).
+   * - `200` with an empty list → nothing to show and NO credit spent (fix round 1, F3: a
+   *   distinct `"empty"` reason, not `"error"` — nothing failed).
+   * - `409 already_used` → the credit went to a different product; the CTA becomes the
+   *   Premium sheet rather than a button the server will keep refusing.
+   *
+   * `silent` (fix round 1, F2) is set by `resolve()` below for the BACKGROUND same-product
+   * re-serve attempt, never by the user tapping a CTA: it suppresses every toast (a
+   * background attempt failing must stay invisible — the masked card's existing gate
+   * already covers that state) and marks a success so the card skips the unblur.
+   */
+  const revealAlternatives = useCallback(
+    async (productId: string, options?: { silent?: boolean }) => {
+      const silent = options?.silent ?? false
+      // Fix C2: this call's own identity, threaded through every action it dispatches, so
+      // the reducer can tell its outcome apart from any OTHER reveal call for the same
+      // product (e.g. an overlapping F2 background re-serve) rather than trusting whichever
+      // one happens to land last.
+      revealTokenRef.current += 1
+      const token = revealTokenRef.current
+      dispatch({ type: "reveal_started", productId, silent, token })
+      try {
+        const response = await fetch("/api/scan/reveal", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ productId }),
+        })
+        if (!response.ok) {
+          const payload = (await response.json().catch(() => null)) as { error?: string } | null
+          const alreadyUsed = payload?.error === "already_used"
+          dispatch({
+            type: "reveal_failed",
+            productId,
+            reason: alreadyUsed ? "already_used" : "error",
+            token,
+          })
+          if (!alreadyUsed && !silent) toast({ title: GENERIC_ERROR, variant: "destructive" })
+          return
+        }
+        const result = (await response.json()) as {
+          alternatives?: ScanAlternativePresentation[]
+        }
+        const alternatives = result.alternatives ?? []
+        if (alternatives.length === 0) {
+          dispatch({ type: "reveal_failed", productId, reason: "empty", token })
+          if (!silent) toast({ title: SCAN_REVEAL_EMPTY_NOTICE })
+          return
+        }
+        dispatch({ type: "reveal_succeeded", productId, alternatives, silent, token })
+      } catch {
+        dispatch({ type: "reveal_failed", productId, reason: "error", token })
+        if (!silent) toast({ title: GENERIC_ERROR, variant: "destructive" })
+      }
+    },
+    [toast],
+  )
 
   const resolve = useCallback(
     async (
@@ -223,7 +432,7 @@ export function ScanFlow({
           returnToScanning()
           return
         }
-        const result = (await response.json()) as ScanResolveResult
+        const result = (await response.json()) as ScanClientResolveResult
         if (confirmUntil !== null) {
           const remaining = confirmUntil - performance.now()
           if (remaining > 0) await new Promise((done) => window.setTimeout(done, remaining))
@@ -240,7 +449,38 @@ export function ScanFlow({
             snapshotSource: result.snapshotSource,
           })
         }
-        dispatch({ type: "resolved", token, result })
+        // T10: the trigger layer's own tier gate, computed the same way as `merkenLocked`
+        // below (server prop OR this response's own shape) — never a fresh client guess.
+        // `stateRef` (not `state`) because `resolve` is not re-created on every render.
+        const effectiveTier: EntitlementTier =
+          tier === "free" || stateRef.current.tier === "free" ? "free" : "premium"
+        // PR2 review fix (C3): the very first moment THIS resolve proves free tier — via
+        // either source — the persisted fatigue budget must already be hydrated into
+        // reducer state before the `resolved` dispatch below, because THAT dispatch is what
+        // evaluates this verdict's own trigger decision against `proactiveTriggerShown`.
+        // A no-op once already hydrated (from the mount effect or an earlier resolve), and
+        // never called at all for a session that stays premium/flag-off the whole time.
+        if (effectiveTier === "free") hydrateFatigueBudget()
+        dispatch({
+          type: "resolved",
+          token,
+          result,
+          tier: effectiveTier,
+          sessionNumber: sessionNumberRef.current,
+        })
+        // Fix round 1 (F2): a masked verdict with the credit already spent MIGHT be the
+        // same product the credit was spent on — the reveal endpoint is idempotent, so
+        // attempting it silently either re-serves that same card (a rescan or a reload of
+        // the revealed product) or 409s for a different one, which just confirms today's
+        // Premium gate. `revealAlternatives` itself no-ops once the user has moved to a
+        // different product (the reducer's `ownsResultProduct` guard).
+        if (
+          result.kind === "in_catalog" &&
+          isMaskedScanVerdict(result) &&
+          !result.freeRevealAvailable
+        ) {
+          void revealAlternatives(result.product.productId, { silent: true })
+        }
       } catch {
         if (!requests.isCurrent(token)) return
         resolveInFlightRef.current = false
@@ -249,7 +489,16 @@ export function ScanFlow({
         returnToScanning()
       }
     },
-    [analytics, clearSheetTimer, requests, returnToScanning, toast],
+    [
+      analytics,
+      clearSheetTimer,
+      hydrateFatigueBudget,
+      requests,
+      returnToScanning,
+      revealAlternatives,
+      tier,
+      toast,
+    ],
   )
 
   /**
@@ -396,12 +645,55 @@ export function ScanFlow({
   const { step } = state
   const sheetOpen = step.kind !== "scanning"
   const resultStep = step.kind === "result" ? step : null
+  /**
+   * Every free-state decision below reads either the server-derived `tier` prop or the
+   * RESPONSE, never a client-side entitlement guess (fix round 1, F1): `merkenLocked`
+   * locks from first paint off `tier` (fails closed to `"premium"` upstream, so this side
+   * can never mislock a premium user) and stays locked once a resolve response proves the
+   * caller free even if `tier` somehow degraded. The reveal affordances follow this
+   * verdict's own masked shape.
+   */
+  const merkenLocked = tier === "free" || state.tier === "free"
+  /**
+   * T10: a plain local binding (not `state.activeProactiveTrigger` read again inline)
+   * so TypeScript keeps the non-null narrowing inside the `onOpenSheet` closure below —
+   * narrowing a `const` survives a closure; narrowing a property read from `state` would
+   * not, since `state` could in principle change before the closure runs.
+   */
+  const activeProactiveTrigger = state.activeProactiveTrigger
+  const revealedAlternatives = scanRevealedAlternatives(state)
+  const revealAnimatesAlternatives = scanRevealAnimates(state)
+  const revealPending = state.reveal.status === "pending"
+  const revealUnavailable = state.reveal.status === "unavailable"
   const cameraTileReason: ScanCameraTileReason | null =
     state.camera.status === "unavailable"
       ? state.camera.reason
       : state.camera.status === "stalled"
         ? "stalled"
         : null
+
+  /**
+   * PR2 review fix (C4): the five T9/T10 debug attributes below are only ever meaningful
+   * for a free-tier render — `state.tier`/`state.reveal`/the trigger fields never leave
+   * their inert defaults for a premium or flag-off session, because none of the code paths
+   * that change them can run without `merkenLocked` (or the equivalent tier check) being
+   * true first. Gating their PRESENCE on the same signal, rather than always emitting them
+   * (previously "unknown"/"idle"/"none"/"false"), is what makes a premium/flag-off render
+   * byte-identical to before T9/T10 touched this file — the binding invariant every other
+   * flag-gated surface in this repo holds (see `access.ts`'s doc comment on
+   * `hasFreemiumPaidAccess`).
+   */
+  const scanFlowDebugAttributes = merkenLocked
+    ? {
+        "data-scan-tier": state.tier,
+        "data-scan-reveal": state.reveal.status,
+        "data-scan-premium-sheet": state.premiumSheet?.feature ?? "none",
+        "data-scan-active-trigger": activeProactiveTrigger ?? "none",
+        "data-scan-zwei-scans-gleiche-kategorie": state.zweiScansGleicheKategorie
+          ? "true"
+          : "false",
+      }
+    : {}
 
   return (
     <div
@@ -411,7 +703,9 @@ export function ScanFlow({
        * attributes, so an end-to-end assertion can name a transition instead of guessing
        * it from copy. Cheaper than a debug prop (nothing to thread through, nothing the
        * production caller has to pass) and inert in production — six attributes on one
-       * div, no behaviour attached.
+       * div, no behaviour attached. The five T9/T10 attributes are spread in via
+       * `scanFlowDebugAttributes` — see its comment: absent, not merely "none"/"unknown",
+       * for a premium or flag-off render.
        */
       data-scan-flow=""
       data-scan-step={step.kind}
@@ -420,12 +714,18 @@ export function ScanFlow({
       data-scan-camera-reason={cameraTileReason ?? "none"}
       data-scan-save-open={state.saveOpen ? "true" : "false"}
       data-scan-epoch={state.epoch}
+      {...scanFlowDebugAttributes}
       className="mx-auto w-full max-w-[430px] px-3 sm:max-w-[560px] sm:px-5"
     >
       <div className="flex items-center justify-between py-2">
         <h1 className="text-[17px] font-bold text-foreground">Scan</h1>
         <ScanWishlistTrigger
-          onClick={() => dispatch({ type: "auxiliary_opened", sheet: "wishlist" })}
+          locked={merkenLocked}
+          onClick={() =>
+            merkenLocked
+              ? dispatch({ type: "premium_sheet_opened", context: MERKLISTE_GATE })
+              : dispatch({ type: "auxiliary_opened", sheet: "wishlist" })
+          }
         />
       </div>
 
@@ -485,7 +785,12 @@ export function ScanFlow({
               verdict={resultStep.result.kind === "in_catalog" ? resultStep.result.verdict : null}
               product={resultStep.result.product}
               savedState={resultStep.result.savedState}
-              onSave={() => dispatch({ type: "save_sheet_toggled", open: true })}
+              saveLocked={merkenLocked}
+              onSave={() =>
+                merkenLocked
+                  ? dispatch({ type: "premium_sheet_opened", context: MERKLISTE_GATE })
+                  : dispatch({ type: "save_sheet_toggled", open: true })
+              }
               onBuy={() =>
                 analytics.track("scan_buy_clicked", {
                   verdict: resultVerdictLabel(resultStep.result),
@@ -499,6 +804,14 @@ export function ScanFlow({
         {resultStep ? (
           <ScanResultCard
             result={resultStep.result}
+            revealedAlternatives={revealedAlternatives}
+            revealAnimates={revealAnimatesAlternatives}
+            revealPending={revealPending}
+            revealUnavailable={revealUnavailable}
+            onReveal={() => void revealAlternatives(resultStep.result.product.productId)}
+            onPremiumAlternatives={() =>
+              dispatch({ type: "premium_sheet_opened", context: EMPFEHLUNGEN_GATE })
+            }
             onRescan={returnToScanning}
             onOpenAlternative={openFromProductId}
             // An alternative's "Kaufen ↗" reports the verdict of the payload it was
@@ -508,6 +821,27 @@ export function ScanFlow({
                 verdict: resultVerdictLabel(resultStep.result),
               })
             }
+          />
+        ) : null}
+        {/* T10 trigger layer: additive cards below the verdict, never inside
+            `ScanResultCard` — T9's tested composition stays untouched. Both gates are
+            zero-render for premium/flag-off (the reducer only ever sets these once the
+            trigger's own tier gate has confirmed free tier). */}
+        {resultStep && state.zweiScansGleicheKategorie ? (
+          <ScanCategoryRepeatCard
+            categoryLabel={resultStep.result.product.categoryLabel}
+            onOpenSheet={() => dispatch({ type: "premium_sheet_opened", context: ZWEI_SCANS_GATE })}
+          />
+        ) : null}
+        {resultStep && activeProactiveTrigger ? (
+          <ScanProactiveTriggerCard
+            id={activeProactiveTrigger}
+            onOpenSheet={() => {
+              const context = scanTriggerSheetContext(activeProactiveTrigger)
+              // `kategorien_luecke` never opens the sheet (journey ruling) — its card is a
+              // plain Link, so `onOpenSheet` is simply never invoked for it.
+              if (context) dispatch({ type: "premium_sheet_opened", context })
+            }}
           />
         ) : null}
         {step.kind === "unknown" ? (
@@ -567,6 +901,15 @@ export function ScanFlow({
         // and keeps every buy click in one event.
         onBuy={() => analytics.track("scan_buy_clicked", { verdict: "merkliste" })}
       />
+
+      {/* Every free-tier gate on this surface — Merken and the post-reveal alternatives
+          CTA — opens the one stub sheet from T5. PR4 replaces its body with the real
+          paywall behind the same opener contract. */}
+      <PremiumSheet
+        open={state.premiumSheet !== null}
+        context={state.premiumSheet}
+        onClose={() => dispatch({ type: "premium_sheet_closed" })}
+      />
     </div>
   )
 }
@@ -575,7 +918,7 @@ export function ScanFlow({
  * The `verdict` analytics property: the fit verdict on `in_catalog`, or the need
  * mode ("not_needed" / "deferred") when the category reached no fit verdict at all.
  */
-function resultVerdictLabel(result: ScanResolvedVerdictResult): string {
+function resultVerdictLabel(result: ScanVerdictResult): string {
   return result.kind === "in_catalog" ? result.verdict : result.mode
 }
 

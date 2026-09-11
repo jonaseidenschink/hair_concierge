@@ -2,7 +2,12 @@ import { CATEGORY_COPY } from "@/components/personal-plan-products/stage3-produc
 import type { PersonalPlanCategory } from "@/lib/personal-plan/products/contracts"
 import { presentCatalogCommerce } from "@/lib/personal-plan/routine/commerce"
 
-import type { ScanPresentedVerdictPayload, ScanProductHeader, ScanVerdictPayload } from "./types"
+import type {
+  ScanAlternativePresentation,
+  ScanPresentedVerdictPayload,
+  ScanProductHeader,
+  ScanVerdictPayload,
+} from "./types"
 
 /**
  * Catalog presentation, joined onto the verdict after the fact.
@@ -61,13 +66,48 @@ export function presentScanVerdictPayload(
   const byId = new Map(rows.map((row) => [row.id, row]))
   return {
     ...verdict,
-    alternatives: verdict.alternatives.map((alternative) => {
+    alternatives: verdict.alternatives.map((alternative): ScanAlternativePresentation => {
       const row = byId.get(alternative.productId)
+      // Field list spelled out (not `...alternative`) on purpose: `ScanAlternative` also
+      // carries `criteria` (T8, server-internal only — see types.ts) and a spread would
+      // let it ride along onto the wire. Listing every field here means a new
+      // `ScanAlternative` field either lands here deliberately or fails to compile.
       return {
-        ...alternative,
+        productId: alternative.productId,
+        displayName: alternative.displayName,
+        imageUrl: alternative.imageUrl,
+        priceLabel: alternative.priceLabel,
+        netContentLabel: alternative.netContentLabel,
+        verdict: alternative.verdict,
+        verdictLabel: alternative.verdictLabel,
         brand: row?.brand ?? null,
         purchaseUrl: row ? commerceFor(row).productUrl : null,
       }
     }),
+  }
+}
+
+/**
+ * Drops disposition-quarantined products from an `in_catalog` verdict's alternatives
+ * (ruling R7 — a quarantined product must not be recommended, only resolved/saved is
+ * covered elsewhere). Shared by the resolve route (T8: applied before either the full or
+ * masked serialization branch) and the reveal route (T8), which recomputes the same
+ * candidate list and must apply the identical filter so a revealed alternative can never
+ * be one resolve would have hidden.
+ */
+export async function withEligibleAlternatives(
+  verdict: ScanVerdictPayload,
+  loadQuarantined: (productIds: string[]) => Promise<Set<string>>,
+): Promise<ScanVerdictPayload> {
+  if (verdict.kind !== "in_catalog" || verdict.alternatives.length === 0) return verdict
+  const quarantined = await loadQuarantined(
+    verdict.alternatives.map((alternative) => alternative.productId),
+  )
+  if (quarantined.size === 0) return verdict
+  return {
+    ...verdict,
+    alternatives: verdict.alternatives.filter(
+      (alternative) => !quarantined.has(alternative.productId),
+    ),
   }
 }

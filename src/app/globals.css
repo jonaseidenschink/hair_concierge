@@ -791,6 +791,30 @@
   }
 }
 
+/*
+ * Freemium scanner-first (T9): the one-lifetime reveal. The masked alternative card is
+ * blurred; when the reveal succeeds, the full card mounts in its place and comes out of
+ * that blur over 1.2s. Outside `prefers-reduced-motion: no-preference` the class is
+ * simply absent, so the revealed card is sharp from the first frame — the animation is
+ * inert, not merely shortened (same contract as the viewfinder animations above).
+ */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes scan-reveal-unblur {
+    from {
+      filter: blur(10px);
+      opacity: 0.55;
+    }
+    to {
+      filter: blur(0);
+      opacity: 1;
+    }
+  }
+
+  .scan-reveal-unblur {
+    animation: scan-reveal-unblur 1.2s ease-out both;
+  }
+}
+
 /* Prose overrides for light background */
 .prose {
   --tw-prose-body: var(--text-body);

@@ -74,6 +74,12 @@ export type HasFreemiumPaidAccessDeps = {
   resolveModeratorAccess?: typeof resolveModeratorAccess
 }
 
+/** Same deps shape as `hasFreemiumPaidAccess` — `resolvePaidAppAccess` is its
+ * flag-independent composite body, so callers that need the composite without
+ * the freemium-flag gate (e.g. the T6 free-snapshot provisioning guard) use
+ * this alias for clarity at the call site. */
+export type ResolvePaidAppAccessDeps = HasFreemiumPaidAccessDeps
+
 /**
  * `"allowed"` / `"denied"` mirror the middleware paywall's binary outcome.
  * `"unavailable"` mirrors the middleware's `moderator_access_unavailable`
@@ -83,23 +89,24 @@ export type HasFreemiumPaidAccessDeps = {
  */
 export type FreemiumAccessResult = "allowed" | "denied" | "unavailable"
 
-export async function hasFreemiumPaidAccess(
+/**
+ * The full flag-INDEPENDENT paid-access composite — `active || oneTimeAccessState
+ * === "active" || moderatorAccess === "active"`, including manual/email-keyed
+ * grants (via `hasAppAccess`) and the moderator/field-test roster (via
+ * `resolveModeratorAccess`), with the same "unavailable" fail-closed handling
+ * documented on `hasFreemiumPaidAccess` below. This is the extracted body
+ * `hasFreemiumPaidAccess` runs once its own flag/inertness check has passed —
+ * use this directly (T6 review fix) for any caller that needs the composite
+ * outside the freemium-flag-gated route-guard context, so a moderator/
+ * field-test or email-only-grant holder is never mistaken for a plain free
+ * user regardless of the flag's state.
+ */
+export async function resolvePaidAppAccess(
   userId: string,
   email: string | null | undefined,
   fieldTestGuest: boolean,
-  deps: HasFreemiumPaidAccessDeps = {},
+  deps: ResolvePaidAppAccessDeps = {},
 ): Promise<FreemiumAccessResult> {
-  // PR1 review fix (F1a): inert with the flag off. Every route this guard
-  // covers stays fully middleware-gated when the flag is off (a free user
-  // never reaches the route at all — see enforcement-matrix.md), so the
-  // guard must not perform any billing/moderator lookup in that state; doing
-  // so risks diverging from middleware for edge cases middleware itself
-  // doesn't even evaluate while the flag is off (see the field-test note
-  // above the deps type).
-  if (!isFreemiumScannerFirstEnabled()) {
-    return "allowed"
-  }
-
   const client = deps.client ?? createAdminClient()
   const hasAppAccess = deps.hasAppAccess ?? hasCurrentAppAccess
   const hasPaidAppAccess = deps.hasPaidAppAccess ?? hasCurrentPaidAppAccess
@@ -136,4 +143,24 @@ export async function hasFreemiumPaidAccess(
 
   const allowed = active || oneTimeAccessState === "active" || moderatorAccess.kind === "active"
   return allowed ? "allowed" : "denied"
+}
+
+export async function hasFreemiumPaidAccess(
+  userId: string,
+  email: string | null | undefined,
+  fieldTestGuest: boolean,
+  deps: HasFreemiumPaidAccessDeps = {},
+): Promise<FreemiumAccessResult> {
+  // PR1 review fix (F1a): inert with the flag off. Every route this guard
+  // covers stays fully middleware-gated when the flag is off (a free user
+  // never reaches the route at all — see enforcement-matrix.md), so the
+  // guard must not perform any billing/moderator lookup in that state; doing
+  // so risks diverging from middleware for edge cases middleware itself
+  // doesn't even evaluate while the flag is off (see the field-test note
+  // above the deps type).
+  if (!isFreemiumScannerFirstEnabled()) {
+    return "allowed"
+  }
+
+  return resolvePaidAppAccess(userId, email, fieldTestGuest, deps)
 }

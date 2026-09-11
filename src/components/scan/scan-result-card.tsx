@@ -8,17 +8,24 @@ import {
   scanNotNeededSections,
   scanReasonsLabel,
 } from "@/lib/scan/result-presentation"
+import { SCAN_REVEAL_EMPTY_NOTICE } from "@/lib/scan/verdict-labels"
 import type {
   ScanAlternativePresentation,
   ScanProductHeader,
-  ScanResolvedVerdictResult,
   ScanStatusToken,
 } from "@/lib/scan/types"
+import {
+  isMaskedScanVerdict,
+  scanRevealCta,
+  type ScanVerdictResult,
+} from "@/lib/scan/verdict-access"
 import type { Stage3CriterionResult } from "@/lib/personal-plan/products/contracts"
 import { cn } from "@/lib/utils"
 
 import { ScanDimensionBar } from "./scan-dimension-bar"
+import { ScanMaskedAlternatives } from "./scan-masked-alternatives"
 import { ScanProductThumb } from "./scan-product-thumb"
+import { SCAN_MARKER_CLASS, SCAN_STATUS_CLASS } from "./scan-status-tokens"
 
 /**
  * The scan verdict body (UI spec §2). Same anatomy in every verdict: product header,
@@ -27,19 +34,8 @@ import { ScanProductThumb } from "./scan-product-thumb"
  * this file only owns fixed section chrome.
  */
 
-const STATUS_CLASS: Record<ScanStatusToken, string> = {
-  ok: "bg-[var(--status-ok-bg)] text-[var(--status-ok-text)]",
-  pending: "bg-[var(--status-pending-bg)] text-[var(--status-pending-text)]",
-  danger: "bg-[var(--status-danger-bg)] text-[var(--status-danger-text)]",
-  neutral: "bg-[var(--status-neutral-bg)] text-[var(--status-neutral-text)]",
-}
-
-const MARKER_CLASS: Record<ScanStatusToken, string> = {
-  ok: "text-[var(--status-ok-text)]",
-  pending: "text-[var(--status-pending-text)]",
-  danger: "text-[var(--status-danger-text)]",
-  neutral: "text-muted-foreground",
-}
+const STATUS_CLASS = SCAN_STATUS_CLASS
+const MARKER_CLASS = SCAN_MARKER_CLASS
 
 /**
  * Fixed reassurance for a verdict that can change with the profile behind it. Not
@@ -50,20 +46,105 @@ const GOOD_TO_KNOW_BODY = "Ändert sich dein Haar oder deine Routine, prüfen wi
 
 export function ScanResultCard({
   result,
+  revealedAlternatives = null,
+  revealAnimates = true,
+  revealPending = false,
+  revealUnavailable = false,
   onRescan,
   onOpenAlternative,
   onBuyAlternative,
+  onReveal = () => {},
+  onPremiumAlternatives = () => {},
 }: {
-  result: ScanResolvedVerdictResult
+  result: ScanVerdictResult
+  /**
+   * Free tier only (T9): the full alternatives the one-lifetime reveal handed back for
+   * THIS product. Always `null` for a premium or flag-off verdict, whose alternatives
+   * were never masked in the first place.
+   */
+  revealedAlternatives?: ScanAlternativePresentation[] | null
+  /**
+   * Whether `revealedAlternatives` should play the 1.2s unblur (fix round 1, F2). `true`
+   * for an explicit CTA tap; `false` for the background same-product re-serve (a rescan or
+   * a reload replaying a credit already spent on this exact product) — nothing is being
+   * "revealed" to the user there, so the card should simply already look sharp.
+   */
+  revealAnimates?: boolean
+  revealPending?: boolean
+  revealUnavailable?: boolean
   onRescan: () => void
   onOpenAlternative: (productId: string) => void
   /** An alternative's "Kaufen ↗" is a buy click too — same event as the footer's. */
   onBuyAlternative: (productId: string) => void
+  onReveal?: () => void
+  onPremiumAlternatives?: () => void
 }) {
   const sections =
     result.kind === "not_needed"
       ? scanNotNeededSections(result)
       : { reasons: false, goodToKnow: false, coveredBy: false }
+
+  /**
+   * Three mutually exclusive shapes for the alternatives block. The LAST one is today's
+   * path, reached by every premium and every flag-off verdict (their response carries no
+   * masking marker at all), and it renders exactly as before this task.
+   */
+  let alternativesBlock: React.ReactNode = null
+  if (result.kind === "in_catalog" && isMaskedScanVerdict(result)) {
+    if (revealedAlternatives) {
+      if (revealedAlternatives.length > 0) {
+        // The reveal succeeded: the SAME card the premium tier gets. `revealAnimates`
+        // decides whether it arrives out of the masked card's blur (globals.css, 1.2s,
+        // inert under reduced motion) — an explicit tap — or already sharp — the
+        // background same-product re-serve (fix round 1, F2).
+        const alternativesList = (
+          <Alternatives
+            alternatives={revealedAlternatives}
+            onOpen={onOpenAlternative}
+            onBuy={onBuyAlternative}
+          />
+        )
+        alternativesBlock = revealAnimates ? (
+          <div className="scan-reveal-unblur" data-scan-revealed-alternatives="">
+            {alternativesList}
+          </div>
+        ) : (
+          <div data-scan-revealed-alternatives="">{alternativesList}</div>
+        )
+      } else {
+        // Not reachable via today's `revealAlternatives()` (it never dispatches
+        // `reveal_succeeded` with an empty list — see `reveal_failed reason:"empty"`), but
+        // an empty list must not silently erase the whole block for whoever calls the
+        // reducer next (fix round 1, F4).
+        alternativesBlock = (
+          <p data-scan-reveal-empty="" className="text-[13px] leading-6 text-muted-foreground">
+            {SCAN_REVEAL_EMPTY_NOTICE}
+          </p>
+        )
+      }
+    } else if (result.alternatives.length > 0) {
+      alternativesBlock = (
+        <ScanMaskedAlternatives
+          alternatives={result.alternatives}
+          cta={scanRevealCta({
+            freeRevealAvailable: result.freeRevealAvailable,
+            revealUnavailable,
+          })}
+          revealPending={revealPending}
+          onReveal={onReveal}
+          onPremium={onPremiumAlternatives}
+        />
+      )
+    }
+  } else if (result.kind === "in_catalog" && result.alternatives.length > 0) {
+    alternativesBlock = (
+      <Alternatives
+        alternatives={result.alternatives}
+        onOpen={onOpenAlternative}
+        onBuy={onBuyAlternative}
+      />
+    )
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -129,13 +210,7 @@ export function ScanResultCard({
         <CoveredBy entries={result.coveredBy} />
       ) : null}
 
-      {result.kind === "in_catalog" && result.alternatives.length > 0 ? (
-        <Alternatives
-          alternatives={result.alternatives}
-          onOpen={onOpenAlternative}
-          onBuy={onBuyAlternative}
-        />
-      ) : null}
+      {alternativesBlock}
 
       <button
         type="button"

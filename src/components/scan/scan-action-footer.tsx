@@ -7,6 +7,8 @@ import type { ScanSavedStatePayload } from "@/lib/scan/saved-state"
 import type { ScanProductHeader, ScanVerdict } from "@/lib/scan/types"
 import { cn } from "@/lib/utils"
 
+import { ScanLockBadge } from "./scan-lock-badge"
+
 /**
  * Pinned two-slot footer (UI spec §3). Slot order and weight follow the verdict; the
  * buy affordance is never removed, only labelled honestly. An unbuyable product drops
@@ -34,6 +36,7 @@ export function ScanActionFooter({
   verdict,
   product,
   savedState,
+  saveLocked = false,
   onSave,
   onBuy,
 }: {
@@ -41,6 +44,13 @@ export function ScanActionFooter({
   verdict: ScanVerdict | null
   product: ScanProductHeader
   savedState: ScanSavedStatePayload
+  /**
+   * Free tier under the freemium restructure (T9): Merken is a premium feature and
+   * `/api/scan/save` denies it server-side, so the slot carries a corner lock and opens
+   * the Premium sheet instead of the save sheet. Default `false` — premium and flag-off
+   * callers keep today's footer exactly.
+   */
+  saveLocked?: boolean
   onSave: () => void
   onBuy: (url: string) => void
 }) {
@@ -61,6 +71,18 @@ export function ScanActionFooter({
             {action.label}
             <ExternalLink className="h-4 w-4" aria-hidden="true" />
           </a>
+        ) : saveLocked ? (
+          <button
+            key="save"
+            type="button"
+            data-scan-save-locked="true"
+            aria-label={`${action.label} — Premium`}
+            onClick={onSave}
+            className={cn(SLOT_CLASS, TONE_CLASS[action.tone], "relative")}
+          >
+            {action.label}
+            <ScanLockBadge />
+          </button>
         ) : (
           <button
             key="save"

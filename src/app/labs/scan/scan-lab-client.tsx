@@ -4,6 +4,7 @@ import { useMemo } from "react"
 
 import { ScanFlow } from "@/components/scan/scan-flow"
 import type { ScanBarcodeDetector, ScannerRuntime } from "@/components/scan/use-scanner-loop"
+import type { EntitlementTier } from "@/lib/entitlements"
 import type { ScanAnalyticsPort } from "@/lib/scan/scan-analytics"
 import { ToastProvider } from "@/providers/toast-provider"
 
@@ -33,6 +34,20 @@ type ScanLabState = {
   cameraReason: string
   saveOpen: boolean
   epoch: number
+  /**
+   * Freemium scanner-first (T9): the tier the resolve responses have proven so far, the
+   * one-lifetime reveal's status, and which Premium-sheet gate is open ("none" while it
+   * is closed). All three are read off the flow root like every other field here.
+   */
+  tier: string
+  reveal: string
+  premiumSheet: string
+  /**
+   * Trigger layer (T10): which proactive card is currently shown ("none" while closed)
+   * and whether the always-available "2. Scan, gleiche Kategorie" gate is showing.
+   */
+  activeTrigger: string
+  zweiScansGleicheKategorie: boolean
   /**
    * What the VIEWFINDER is drawing — `searching` / `spotted` / `read`, or `""` while the
    * scanner is not mounted at all. It lives on the scanner root (inside the flow root),
@@ -99,6 +114,14 @@ declare global {
     __SCAN_LAB_HOLD_CAMERA?: boolean
     /** Boot flag: make the FIRST acquisition fail with this `DOMException` name. */
     __SCAN_LAB_DENY_CAMERA?: string
+    /**
+     * Boot flag (fix round 1, F1): stands in for the SERVER-derived `tier` prop
+     * `/scan/page.tsx` passes in production (`loadAuthenticatedAppNavigationAccess`).
+     * There is no real session behind this dev-only harness, so a Playwright spec sets
+     * this instead to prove the Merken bookmark locks from first paint. Omitted, `ScanFlow`
+     * gets no `tier` prop at all — same as today.
+     */
+    __SCAN_LAB_TIER?: EntitlementTier
   }
 }
 
@@ -153,6 +176,12 @@ function readFlowState(): ScanLabState | null {
     cameraReason: root.getAttribute("data-scan-camera-reason") ?? "",
     saveOpen: root.getAttribute("data-scan-save-open") === "true",
     epoch: Number(root.getAttribute("data-scan-epoch") ?? "0"),
+    tier: root.getAttribute("data-scan-tier") ?? "",
+    reveal: root.getAttribute("data-scan-reveal") ?? "",
+    premiumSheet: root.getAttribute("data-scan-premium-sheet") ?? "",
+    activeTrigger: root.getAttribute("data-scan-active-trigger") ?? "",
+    zweiScansGleicheKategorie:
+      root.getAttribute("data-scan-zwei-scans-gleiche-kategorie") === "true",
     detection: viewfinder?.getAttribute("data-scan-detection") ?? "",
   }
 }
@@ -332,6 +361,11 @@ function createScanLab(): ScanLabInternals {
       previous.cameraReason === next.cameraReason &&
       previous.saveOpen === next.saveOpen &&
       previous.epoch === next.epoch &&
+      previous.tier === next.tier &&
+      previous.reveal === next.reveal &&
+      previous.premiumSheet === next.premiumSheet &&
+      previous.activeTrigger === next.activeTrigger &&
+      previous.zweiScansGleicheKategorie === next.zweiScansGleicheKategorie &&
       previous.detection === next.detection
     ) {
       return
@@ -349,6 +383,11 @@ function createScanLab(): ScanLabInternals {
       "data-scan-camera-reason",
       "data-scan-save-open",
       "data-scan-epoch",
+      "data-scan-tier",
+      "data-scan-reveal",
+      "data-scan-premium-sheet",
+      "data-scan-active-trigger",
+      "data-scan-zwei-scans-gleiche-kategorie",
       "data-scan-detection",
     ],
   })
@@ -374,11 +413,12 @@ function ensureScanLab(): ScanLabInternals {
 
 export function ScanLabClient() {
   const harness = useMemo(() => (typeof window === "undefined" ? null : ensureScanLab()), [])
+  const tier = typeof window === "undefined" ? undefined : window.__SCAN_LAB_TIER
 
   return (
     <ToastProvider>
       <main className="min-h-dvh bg-background py-4">
-        <ScanFlow analytics={harness?.analytics} scannerRuntime={harness?.runtime} />
+        <ScanFlow analytics={harness?.analytics} scannerRuntime={harness?.runtime} tier={tier} />
       </main>
     </ToastProvider>
   )

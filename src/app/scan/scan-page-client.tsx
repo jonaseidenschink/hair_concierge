@@ -1,6 +1,7 @@
 "use client"
 
 import { ScanFlow } from "@/components/scan/scan-flow"
+import type { EntitlementTier } from "@/lib/entitlements"
 import { scanAnalytics } from "@/lib/scan/scan-analytics"
 
 /**
@@ -12,7 +13,10 @@ import { scanAnalytics } from "@/lib/scan/scan-analytics"
  * can't cross the RSC boundary as a prop. This file exists solely to supply the real one
  * from inside client-side JS, the same way `plan-start-flow.tsx` passes
  * `stage3BaselineAnalytics` to `Stage3ProductsFlow`.
+ *
+ * `tier` (fix round 1, F1) is a plain serializable value, so `page.tsx` — the Server
+ * Component — hands it straight through; only the analytics PORT needed this boundary.
  */
-export function ScanPageClient() {
-  return <ScanFlow analytics={scanAnalytics} />
+export function ScanPageClient({ tier }: { tier: EntitlementTier }) {
+  return <ScanFlow analytics={scanAnalytics} tier={tier} />
 }

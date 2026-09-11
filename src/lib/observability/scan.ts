@@ -10,7 +10,7 @@ import * as Sentry from "@sentry/nextjs"
  * rest of the API surface treats it (only the checkout-critical auth-link path also captures it,
  * which is not the general pattern this scope follows).
  */
-export type ScanRoute = "resolve" | "search" | "submit" | "save" | "wishlist"
+export type ScanRoute = "resolve" | "search" | "submit" | "save" | "wishlist" | "reveal"
 
 type BreadcrumbLevel = "debug" | "info" | "warning" | "error"
 

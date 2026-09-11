@@ -2,17 +2,34 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import React, { type ReactElement, type ReactNode } from "react"
 
+import { PremiumSheet } from "../src/components/premium-sheet/premium-sheet"
+import { ScanActionFooter } from "../src/components/scan/scan-action-footer"
 import { ScanFlow } from "../src/components/scan/scan-flow"
+import { ScanResultCard } from "../src/components/scan/scan-result-card"
 import { ScanResultSheet } from "../src/components/scan/scan-result-sheet"
 import { ScanSaveSheet, type ScanSaveCompletion } from "../src/components/scan/scan-save-sheet"
 import { ScanSearchSheet } from "../src/components/scan/scan-search-sheet"
+import {
+  ScanCategoryRepeatCard,
+  ScanProactiveTriggerCard,
+} from "../src/components/scan/scan-trigger-cards"
 import { ScanUnknownFlow } from "../src/components/scan/scan-unknown-flow"
-import { ScanWishlistSheet } from "../src/components/scan/scan-wishlist-sheet"
+import { ScanWishlistSheet, ScanWishlistTrigger } from "../src/components/scan/scan-wishlist-sheet"
 import { Scanner } from "../src/components/scan/scanner"
 import type { ScanWishlistEntry } from "../src/app/api/scan/wishlist/route"
+import type { EntitlementTier } from "../src/lib/entitlements"
+import type { ScanMaskedVerdictResult } from "../src/lib/scan/masked-alternative"
 import type { ScanAnalyticsPort } from "../src/lib/scan/scan-analytics"
 import type { ScanSavedStatePayload } from "../src/lib/scan/saved-state"
-import type { ScanResolvedVerdictResult, ScanUnknownProductResult } from "../src/lib/scan/types"
+import {
+  createMemoryScanTriggerStorage,
+  SCAN_SESSION_RECORD_KEY,
+} from "../src/lib/scan/triggers/session-marker"
+import type {
+  ScanAlternativePresentation,
+  ScanResolvedVerdictResult,
+  ScanUnknownProductResult,
+} from "../src/lib/scan/types"
 
 /**
  * `ScanFlow` is a "use client" component: this repo has no jsdom/testing-library, so the
@@ -257,6 +274,13 @@ type FlowHarness = {
  */
 async function mountFlow(
   route: (url: string, init: RequestInit | undefined) => Promise<Response>,
+  options: {
+    tier?: EntitlementTier
+    /** T10: pre-seed to simulate a given session number for the Wiederkehrer trigger. */
+    sessionRecordStorage?: ReturnType<typeof createMemoryScanTriggerStorage>
+    /** Fix round 1 (F1): shared across two `mountFlow` calls to simulate a remount. */
+    fatigueStorage?: ReturnType<typeof createMemoryScanTriggerStorage>
+  } = {},
 ): Promise<FlowHarness> {
   const events: TrackedEvent[] = []
   const toasts: string[] = []
@@ -272,11 +296,20 @@ async function mountFlow(
     globalThis.fetch = previousFetch
   })
 
-  const harness = createClientStateHarness(() => ScanFlow({ analytics }), {
-    toasts: [],
-    dismiss: () => {},
-    toast: (input: { title: string }) => toasts.push(input.title),
-  })
+  const harness = createClientStateHarness(
+    () =>
+      ScanFlow({
+        analytics,
+        tier: options.tier,
+        sessionRecordStorage: options.sessionRecordStorage,
+        fatigueStorage: options.fatigueStorage,
+      }),
+    {
+      toasts: [],
+      dismiss: () => {},
+      toast: (input: { title: string }) => toasts.push(input.title),
+    },
+  )
 
   const flow: FlowHarness = {
     tree: null,
@@ -844,4 +877,620 @@ test("ScanWishlistSheet: a stale load cannot overwrite the newer list (F13)", as
   await view.settle()
 
   assert.deepEqual(entryIds(view.tree), ["new"])
+})
+
+// --- T9: the free tier's verdict states, end to end through the flow ---------
+
+/**
+ * A free-tier `in_catalog` verdict, i.e. T8's masked shape. The only structural
+ * difference to the premium response is the alternatives list plus `freeRevealAvailable`
+ * — which is exactly the signal the flow gates every free state on.
+ */
+function maskedVerdict(productId = "p-a", freeRevealAvailable = true): ScanMaskedVerdictResult {
+  return {
+    kind: "in_catalog",
+    verdict: "mismatch",
+    verdictLabel: "Passt nicht",
+    verdictTitle: "Passt nicht zu deinem Haar",
+    status: "danger",
+    subtitle: "1 von 3 Zielbereichen getroffen",
+    evaluatedRole: null,
+    evaluatedRoleLabel: null,
+    dimensions: [],
+    criteria: [],
+    coverage: null,
+    fitNarrative: null,
+    alternatives: [
+      {
+        verdict: "ideal",
+        verdictLabel: "Passt",
+        comparison: {
+          rows: [{ rowId: "care_weight", label: "Pflegegewicht", state: "match" }],
+          summaryScore: 1,
+        },
+      },
+    ],
+    product: verdictResult(productId).product,
+    snapshotSource: "refined",
+    savedState: { state: null, managedByScan: false },
+    freeRevealAvailable,
+  }
+}
+
+/** The same verdict a premium (or flag-off) caller gets: no masking marker at all. */
+function premiumVerdict(productId = "p-a"): ScanResolvedVerdictResult {
+  const { freeRevealAvailable: _omitted, ...rest } = maskedVerdict(productId)
+  return { ...rest, alternatives: [] }
+}
+
+const REVEALED_ALTERNATIVE: ScanAlternativePresentation = {
+  productId: "p-alt",
+  displayName: "Lab Shampoo Gamma",
+  imageUrl: null,
+  priceLabel: "9,99 €",
+  netContentLabel: null,
+  verdict: "ideal",
+  verdictLabel: "Passt",
+  brand: "Chaarlie Lab",
+  purchaseUrl: null,
+}
+
+function cardProps(tree: ReactNode): Record<string, any> {
+  return requireByType(tree, ScanResultCard, "ScanResultCard").props
+}
+
+function wishlistTriggerProps(tree: ReactNode): Record<string, any> {
+  return requireByType(tree, ScanWishlistTrigger, "ScanWishlistTrigger").props
+}
+
+function footerProps(tree: ReactNode): Record<string, any> {
+  return requireByType(sheetProps(tree).footer, ScanActionFooter, "ScanActionFooter").props
+}
+
+function premiumSheetProps(tree: ReactNode): Record<string, any> {
+  return requireByType(tree, PremiumSheet, "PremiumSheet").props
+}
+
+/** Decode `ean`, wait out the confirm window, and settle into the result sheet. */
+async function scanInto(flow: FlowHarness, ean = "4006381333931"): Promise<void> {
+  scannerProps(flow.tree).onDecoded({ type: "ean", value: ean })
+  await delay(450)
+  await flow.settle()
+}
+
+test("fix round 1 (F1): the server-derived tier prop locks Merken before any scan at all", async () => {
+  const free = await mountFlow(notFound, { tier: "free" })
+  assert.equal(wishlistTriggerProps(free.tree).locked, true)
+
+  const premium = await mountFlow(notFound, { tier: "premium" })
+  assert.equal(wishlistTriggerProps(premium.tree).locked, false)
+
+  // No `tier` prop at all (every other caller in this suite, the labs harness without its
+  // boot flag): unchanged from today — only a resolve response can lock it.
+  const untiered = await mountFlow(notFound)
+  assert.equal(wishlistTriggerProps(untiered.tree).locked, false)
+})
+
+test("free tier: a masked verdict locks Merken on both surfaces and offers the reveal", async () => {
+  const flow = await mountFlow(async () => json(maskedVerdict()))
+  await scanInto(flow)
+
+  assert.equal(cardProps(flow.tree).result.freeRevealAvailable, true)
+  assert.equal(cardProps(flow.tree).revealedAlternatives, null)
+  assert.equal(wishlistTriggerProps(flow.tree).locked, true)
+  assert.equal(footerProps(flow.tree).saveLocked, true)
+  assert.equal(premiumSheetProps(flow.tree).open, false)
+})
+
+test("free tier: the reveal posts the SCANNED product's id and unblurs into the full card", async () => {
+  const revealBodies: string[] = []
+  const flow = await mountFlow(async (url, init) => {
+    if (url === "/api/scan/resolve") return json(maskedVerdict("p-a"))
+    if (url === "/api/scan/reveal") {
+      revealBodies.push(String(init?.body))
+      return json({ ok: true, productId: "p-a", alternatives: [REVEALED_ALTERNATIVE] })
+    }
+    return notFound()
+  })
+  await scanInto(flow)
+
+  cardProps(flow.tree).onReveal()
+  await flow.settle()
+
+  // Masked alternatives carry no id to round-trip, so the body names the scanned product.
+  assert.deepEqual(JSON.parse(revealBodies[0]), { productId: "p-a" })
+  assert.deepEqual(cardProps(flow.tree).revealedAlternatives, [REVEALED_ALTERNATIVE])
+  assert.equal(cardProps(flow.tree).revealPending, false)
+  assert.deepEqual(flow.toasts, [])
+})
+
+test("free tier: 409 already_used turns the CTA into the Premium gate without a toast", async () => {
+  const flow = await mountFlow(async (url) => {
+    if (url === "/api/scan/resolve") return json(maskedVerdict())
+    return json({ error: "already_used" }, 409)
+  })
+  await scanInto(flow)
+
+  cardProps(flow.tree).onReveal()
+  await flow.settle()
+
+  assert.equal(cardProps(flow.tree).revealUnavailable, true)
+  assert.equal(cardProps(flow.tree).revealedAlternatives, null)
+  // Nothing went wrong for the user — the credit is simply spent elsewhere.
+  assert.deepEqual(flow.toasts, [])
+})
+
+test("free tier: an empty reveal says so and leaves the unspent credit's CTA in place", async () => {
+  const flow = await mountFlow(async (url) => {
+    if (url === "/api/scan/resolve") return json(maskedVerdict())
+    // T8: an empty eligible list is a 200 that deliberately spends NO credit.
+    return json({ ok: true, productId: "p-a", alternatives: [] })
+  })
+  await scanInto(flow)
+
+  cardProps(flow.tree).onReveal()
+  await flow.settle()
+
+  assert.deepEqual(flow.toasts, ["Gerade keine Alternative verfügbar."])
+  assert.equal(cardProps(flow.tree).revealedAlternatives, null)
+  assert.equal(cardProps(flow.tree).revealUnavailable, false)
+  assert.equal(cardProps(flow.tree).result.freeRevealAvailable, true)
+})
+
+test("free tier: the post-reveal CTA opens the Premium sheet for empfehlungen", async () => {
+  const flow = await mountFlow(async (url) => {
+    if (url === "/api/scan/resolve") return json(maskedVerdict("p-a", false))
+    // Fix round 1 (F2): `freeRevealAvailable:false` now makes the flow attempt a silent
+    // background reveal for this SAME product; here it belongs to a different one, so 409.
+    return json({ error: "already_used" }, 409)
+  })
+  await scanInto(flow)
+
+  assert.equal(cardProps(flow.tree).result.freeRevealAvailable, false)
+  cardProps(flow.tree).onPremiumAlternatives()
+  await flow.settle()
+
+  assert.equal(premiumSheetProps(flow.tree).open, true)
+  assert.deepEqual(premiumSheetProps(flow.tree).context, {
+    feature: "empfehlungen",
+    source: "scan:verdict",
+  })
+  // A paywall over the viewfinder must not keep the detector burning frames.
+  assert.equal(scannerProps(flow.tree).detectionPaused, true)
+})
+
+test("fix round 1 (F2): a masked verdict with the credit spent re-serves the SAME product silently", async () => {
+  const revealBodies: string[] = []
+  const flow = await mountFlow(async (url, init) => {
+    if (url === "/api/scan/resolve") return json(maskedVerdict("p-a", false))
+    if (url === "/api/scan/reveal") {
+      revealBodies.push(String(init?.body))
+      // The endpoint's idempotent re-serve: this IS the product the credit was spent on.
+      return json({ ok: true, productId: "p-a", alternatives: [REVEALED_ALTERNATIVE] })
+    }
+    return notFound()
+  })
+  await scanInto(flow)
+
+  // Nobody called `onReveal` — the flow revealed it on its own.
+  assert.deepEqual(JSON.parse(revealBodies[0]), { productId: "p-a" })
+  assert.deepEqual(cardProps(flow.tree).revealedAlternatives, [REVEALED_ALTERNATIVE])
+  // No unblur this time — nothing is being "revealed" to the user.
+  assert.equal(cardProps(flow.tree).revealAnimates, false)
+  assert.deepEqual(flow.toasts, [])
+})
+
+test("fix round 1 (F2): a background re-serve attempt that 409s stays on the Premium gate, silently", async () => {
+  const revealBodies: string[] = []
+  const flow = await mountFlow(async (url, init) => {
+    if (url === "/api/scan/resolve") return json(maskedVerdict("p-a", false))
+    if (url === "/api/scan/reveal") {
+      revealBodies.push(String(init?.body))
+      return json({ error: "already_used" }, 409)
+    }
+    return notFound()
+  })
+  await scanInto(flow)
+
+  assert.deepEqual(JSON.parse(revealBodies[0]), { productId: "p-a" })
+  assert.equal(cardProps(flow.tree).revealedAlternatives, null)
+  // A background attempt failing must stay invisible — the Premium gate already shows.
+  assert.deepEqual(flow.toasts, [])
+})
+
+test("free tier: Merken opens the Premium sheet instead of the Merkliste or the save sheet", async () => {
+  const flow = await mountFlow(async () => json(maskedVerdict()))
+  await scanInto(flow)
+
+  footerProps(flow.tree).onSave()
+  await flow.settle()
+  assert.deepEqual(premiumSheetProps(flow.tree).context, {
+    feature: "merkliste",
+    source: "scan:verdict",
+  })
+  assert.equal(requireByType(flow.tree, ScanSaveSheet, "ScanSaveSheet").props.open, false)
+
+  premiumSheetProps(flow.tree).onClose()
+  await flow.settle()
+  assert.equal(premiumSheetProps(flow.tree).open, false)
+
+  // The header bookmark stays locked between scans, so it never 403s a free user.
+  sheetProps(flow.tree).onClose()
+  await flow.settle()
+  assert.equal(wishlistTriggerProps(flow.tree).locked, true)
+  wishlistTriggerProps(flow.tree).onClick()
+  await flow.settle()
+  assert.deepEqual(premiumSheetProps(flow.tree).context, {
+    feature: "merkliste",
+    source: "scan:verdict",
+  })
+  assert.equal(requireByType(flow.tree, ScanWishlistSheet, "ScanWishlistSheet").props.open, false)
+})
+
+test("premium: an unmasked verdict leaves every Merken and reveal affordance untouched", async () => {
+  const flow = await mountFlow(async (url) => {
+    if (url === "/api/scan/resolve") return json(premiumVerdict())
+    if (url === "/api/scan/wishlist") return json({ entries: [] })
+    return notFound()
+  })
+  await scanInto(flow)
+
+  assert.equal(wishlistTriggerProps(flow.tree).locked, false)
+  assert.equal(footerProps(flow.tree).saveLocked, false)
+  assert.equal(cardProps(flow.tree).revealedAlternatives, null)
+  assert.equal(premiumSheetProps(flow.tree).open, false)
+
+  // Merken still opens the real save sheet, not a paywall.
+  footerProps(flow.tree).onSave()
+  await flow.settle()
+  assert.equal(requireByType(flow.tree, ScanSaveSheet, "ScanSaveSheet").props.open, true)
+  assert.equal(premiumSheetProps(flow.tree).open, false)
+})
+
+// --- T10: trigger layer, wired end to end through the flow -------------------
+
+/** `verdictResult` with the category overridden, for scanning a 2nd, different category. */
+function verdictResultInCategory(
+  productId: string,
+  category: "shampoo" | "conditioner",
+): ScanResolvedVerdictResult {
+  const base = verdictResult(productId)
+  return { ...base, product: { ...base.product, category, categoryLabel: category } }
+}
+
+function triggerCardProps(tree: ReactNode): Record<string, any> {
+  return requireByType(tree, ScanProactiveTriggerCard, "ScanProactiveTriggerCard").props
+}
+
+const THIRTY_ONE_MINUTES_MS = 31 * 60 * 1000
+
+/** Pre-seeds the localStorage record so the NEXT `recordScanSession` call is session 2. */
+function seedPriorSession(
+  storage: ReturnType<typeof createMemoryScanTriggerStorage>,
+  count = 1,
+): void {
+  storage.setItem(
+    SCAN_SESSION_RECORD_KEY,
+    JSON.stringify({ count, lastSeenAt: Date.now() - THIRTY_ONE_MINUTES_MS }),
+  )
+}
+
+/** Counts every `getItem`/`setItem` call — F5's "zero storage activity" needs a spy. */
+function spyStorage(): {
+  getItem(key: string): string | null
+  setItem(key: string, value: string): void
+  calls: number
+} {
+  const inner = createMemoryScanTriggerStorage()
+  const spy = {
+    calls: 0,
+    getItem(key: string) {
+      spy.calls += 1
+      return inner.getItem(key)
+    },
+    setItem(key: string, value: string) {
+      spy.calls += 1
+      inner.setItem(key, value)
+    },
+  }
+  return spy
+}
+
+test("T10: two scans in the same category surface the repeat card, opening empfehlungen", async () => {
+  const flow = await mountFlow(async () => json(verdictResult("p-a")), { tier: "free" })
+  await scanInto(flow, "1111111111111")
+  assert.equal(findByType(flow.tree, ScanCategoryRepeatCard), null)
+
+  sheetProps(flow.tree).onClose()
+  await flow.settle()
+  await scanInto(flow, "2222222222222")
+
+  const card = requireByType(flow.tree, ScanCategoryRepeatCard, "ScanCategoryRepeatCard")
+  // F7: the repeat card names the actual category, not a debug label.
+  assert.equal(card.props.categoryLabel, "Shampoo")
+  card.props.onOpenSheet()
+  await flow.settle()
+  assert.deepEqual(premiumSheetProps(flow.tree).context, {
+    feature: "empfehlungen",
+    source: "trigger:zwei-scans-gleiche-kategorie",
+  })
+})
+
+test("T10/F4: a session record of exactly 2 shows the Wiederkehrer pitch, opening routine", async () => {
+  const sessionRecordStorage = createMemoryScanTriggerStorage()
+  seedPriorSession(sessionRecordStorage) // next recordScanSession() call becomes session 2
+  const flow = await mountFlow(async () => json(verdictResult("p-a")), {
+    tier: "free",
+    sessionRecordStorage,
+  })
+  await scanInto(flow)
+
+  assert.equal(triggerCardProps(flow.tree).id, "wiederkehrer")
+  triggerCardProps(flow.tree).onOpenSheet()
+  await flow.settle()
+  assert.deepEqual(premiumSheetProps(flow.tree).context, {
+    feature: "routine",
+    source: "trigger:wiederkehrer",
+  })
+})
+
+test("F4: session 1 (no prior record) and session 3+ never show Wiederkehrer", async () => {
+  // Session 1: fresh storage, nothing pre-seeded.
+  const sessionOne = await mountFlow(async () => json(verdictResult("p-a")), {
+    tier: "free",
+    sessionRecordStorage: createMemoryScanTriggerStorage(),
+  })
+  await scanInto(sessionOne)
+  assert.equal(findByType(sessionOne.tree, ScanProactiveTriggerCard), null)
+
+  // Session 3: the record already says count 2, so the next visit becomes session 3.
+  const sessionThreeStorage = createMemoryScanTriggerStorage()
+  seedPriorSession(sessionThreeStorage, 2)
+  const sessionThree = await mountFlow(async () => json(verdictResult("p-a")), {
+    tier: "free",
+    sessionRecordStorage: sessionThreeStorage,
+  })
+  await scanInto(sessionThree)
+  assert.equal(findByType(sessionThree.tree, ScanProactiveTriggerCard), null)
+})
+
+test("T10: fatigue — a second qualifying proactive candidate in the same session shows nothing", async () => {
+  const sessionRecordStorage = createMemoryScanTriggerStorage()
+  seedPriorSession(sessionRecordStorage)
+  let call = 0
+  const flow = await mountFlow(
+    async () => {
+      call += 1
+      return json(
+        call === 1
+          ? verdictResultInCategory("p1", "shampoo")
+          : verdictResultInCategory("p2", "conditioner"),
+      )
+    },
+    { tier: "free", sessionRecordStorage },
+  )
+  await scanInto(flow, "1111111111111")
+  assert.equal(triggerCardProps(flow.tree).id, "wiederkehrer")
+
+  sheetProps(flow.tree).onClose()
+  await flow.settle()
+  await scanInto(flow, "2222222222222")
+
+  // The 2nd scan's own category-gap condition would otherwise qualify kategorien_luecke,
+  // but the session already spent its one proactive pitch on Wiederkehrer.
+  assert.equal(findByType(flow.tree, ScanProactiveTriggerCard), null)
+})
+
+test("F1: the fatigue budget survives a remount (tab away and back) via shared sessionStorage", async () => {
+  const fatigueStorage = createMemoryScanTriggerStorage()
+  const sessionRecordStorage = createMemoryScanTriggerStorage()
+  seedPriorSession(sessionRecordStorage) // this mount's visit becomes session 2
+
+  // Mount 1: a scan qualifies and spends Wiederkehrer.
+  const mount1 = await mountFlow(async () => json(verdictResult("p-a")), {
+    tier: "free",
+    sessionRecordStorage,
+    fatigueStorage,
+  })
+  await scanInto(mount1)
+  assert.equal(triggerCardProps(mount1.tree).id, "wiederkehrer")
+
+  // Mount 2: a genuinely fresh `ScanFlow` instance (a real remount resets the reducer's
+  // in-memory state exactly like this) sharing the SAME `fatigueStorage` — the fix round 1
+  // regression this test guards against is the fatigue flag resetting to unfired here,
+  // which used to let a second proactive pitch (Kategorien-Lücke, from the 2-category scan
+  // below) render on the very next return to `/scan`.
+  let call = 0
+  const mount2 = await mountFlow(
+    async () => {
+      call += 1
+      return json(
+        call === 1
+          ? verdictResultInCategory("p1", "shampoo")
+          : verdictResultInCategory("p2", "conditioner"),
+      )
+    },
+    { tier: "free", sessionRecordStorage, fatigueStorage },
+  )
+  await scanInto(mount2, "1111111111111")
+  assert.equal(findByType(mount2.tree, ScanProactiveTriggerCard), null)
+  sheetProps(mount2.tree).onClose()
+  await mount2.settle()
+  await scanInto(mount2, "2222222222222")
+  assert.equal(findByType(mount2.tree, ScanProactiveTriggerCard), null)
+})
+
+/** `maskedVerdict` with the category overridden, for scanning a 2nd, different category. */
+function maskedVerdictInCategory(
+  productId: string,
+  category: "shampoo" | "conditioner",
+): ScanMaskedVerdictResult {
+  const base = maskedVerdict(productId)
+  return { ...base, product: { ...base.product, category, categoryLabel: category } }
+}
+
+test("C3: a degraded-nav mount (tier prop defaults to premium) still reads the persisted fatigue budget once a response proves free", async () => {
+  const fatigueStorage = createMemoryScanTriggerStorage()
+
+  // Mount 1: a genuinely free session (server-verified tier prop) spends the one proactive
+  // pitch this "session" on Wiederkehrer.
+  const priorSessionRecord = createMemoryScanTriggerStorage()
+  seedPriorSession(priorSessionRecord)
+  const mount1 = await mountFlow(async () => json(verdictResult("p-a")), {
+    tier: "free",
+    sessionRecordStorage: priorSessionRecord,
+    fatigueStorage,
+  })
+  await scanInto(mount1)
+  assert.equal(triggerCardProps(mount1.tree).id, "wiederkehrer")
+
+  // Mount 2: the C3 repro. A degraded nav loader defaulted the `tier` PROP to "premium" for
+  // what is really the SAME free user, sharing the same `fatigueStorage` (a real remount
+  // keeps the same `sessionStorage`). Only a MASKED response — proving free tier via its
+  // own shape, never the prop — can establish free tier here at all.
+  let call = 0
+  const mount2 = await mountFlow(
+    async () => {
+      call += 1
+      return json(
+        call === 1
+          ? maskedVerdictInCategory("p1", "shampoo")
+          : maskedVerdictInCategory("p2", "conditioner"),
+      )
+    },
+    { tier: "premium", fatigueStorage },
+  )
+  // Scan 1 is the response that FIRST proves free tier: its OWN trigger gate still
+  // evaluates as premium (no evidence existed yet at the moment the gate was computed for
+  // this very verdict), so nothing fires here regardless of the fix — this assertion pins
+  // that unaffected baseline.
+  await scanInto(mount2, "1111111111111")
+  assert.equal(findByType(mount2.tree, ScanProactiveTriggerCard), null)
+  sheetProps(mount2.tree).onClose()
+  await mount2.settle()
+  // Scan 2: `effectiveTier` is now "free" (scan 1 proved it) and the Kategorien-Lücke
+  // condition qualifies (2 distinct categories scanned, no leave-in) — the exact case the
+  // fix targets. Before it, this mount's fatigue budget was NEVER hydrated (the mount
+  // effect's `tier !== "free"` guard skipped it forever), so this fired a SECOND proactive
+  // pitch in what `fatigueStorage` proves is really the same spent session.
+  await scanInto(mount2, "2222222222222")
+  assert.equal(findByType(mount2.tree, ScanProactiveTriggerCard), null)
+})
+
+test("T10: Kategorien-Lücke links into /routine and never opens the Premium sheet", async () => {
+  let call = 0
+  const flow = await mountFlow(
+    async () => {
+      call += 1
+      return json(
+        call === 1
+          ? verdictResultInCategory("p1", "shampoo")
+          : verdictResultInCategory("p2", "conditioner"),
+      )
+    },
+    { tier: "free" },
+  )
+  await scanInto(flow, "1111111111111")
+  assert.equal(findByType(flow.tree, ScanProactiveTriggerCard), null)
+
+  sheetProps(flow.tree).onClose()
+  await flow.settle()
+  await scanInto(flow, "2222222222222")
+
+  assert.equal(triggerCardProps(flow.tree).id, "kategorien_luecke")
+  assert.equal(premiumSheetProps(flow.tree).open, false)
+})
+
+test("T10: premium sees zero trigger surfaces even under conditions that would fire every one of them", async () => {
+  const sessionRecordStorage = createMemoryScanTriggerStorage()
+  seedPriorSession(sessionRecordStorage)
+  let call = 0
+  const flow = await mountFlow(
+    async () => {
+      call += 1
+      return json(
+        call === 1
+          ? verdictResultInCategory("p1", "shampoo")
+          : verdictResultInCategory("p2", "conditioner"),
+      )
+    },
+    { tier: "premium", sessionRecordStorage },
+  )
+  await scanInto(flow, "1111111111111")
+  assert.equal(findByType(flow.tree, ScanProactiveTriggerCard), null)
+  assert.equal(findByType(flow.tree, ScanCategoryRepeatCard), null)
+
+  sheetProps(flow.tree).onClose()
+  await flow.settle()
+  await scanInto(flow, "2222222222222")
+
+  assert.equal(findByType(flow.tree, ScanProactiveTriggerCard), null)
+  assert.equal(findByType(flow.tree, ScanCategoryRepeatCard), null)
+  assert.equal(premiumSheetProps(flow.tree).open, false)
+})
+
+test("F5: premium and flag-off (no tier prop) cause zero trigger-storage activity", async () => {
+  const premiumRecord = spyStorage()
+  const premiumFatigue = spyStorage()
+  const premium = await mountFlow(async () => json(verdictResultInCategory("p1", "shampoo")), {
+    tier: "premium",
+    sessionRecordStorage: premiumRecord,
+    fatigueStorage: premiumFatigue,
+  })
+  await scanInto(premium)
+  assert.equal(premiumRecord.calls, 0)
+  assert.equal(premiumFatigue.calls, 0)
+
+  // No `tier` prop at all is exactly what a flag-off mount looks like in production
+  // (`navigation-access.ts` never assigns `tier: "free"` with the flag off).
+  const flagOffRecord = spyStorage()
+  const flagOffFatigue = spyStorage()
+  const flagOff = await mountFlow(async () => json(verdictResultInCategory("p1", "shampoo")), {
+    sessionRecordStorage: flagOffRecord,
+    fatigueStorage: flagOffFatigue,
+  })
+  await scanInto(flagOff)
+  assert.equal(flagOffRecord.calls, 0)
+  assert.equal(flagOffFatigue.calls, 0)
+})
+
+// --- PR2 review fix (C4): premium/flag-off render-identity -------------------
+
+/** The five T9/T10 debug attributes that must be entirely absent, not merely inert. */
+const SCAN_FLOW_DEBUG_ATTRIBUTES = [
+  "data-scan-tier",
+  "data-scan-reveal",
+  "data-scan-premium-sheet",
+  "data-scan-active-trigger",
+  "data-scan-zwei-scans-gleiche-kategorie",
+] as const
+
+test("C4: a premium render never carries the T9/T10 debug attributes, even after a resolve and a Premium-gated action attempt", async () => {
+  const premium = await mountFlow(async () => json(verdictResultInCategory("p1", "shampoo")), {
+    tier: "premium",
+  })
+  await scanInto(premium)
+  const rootProps = (premium.tree as AnyElement).props
+  for (const attribute of SCAN_FLOW_DEBUG_ATTRIBUTES) {
+    assert.equal(attribute in rootProps, false, `expected ${attribute} to be absent for premium`)
+  }
+})
+
+test("C4: a flag-off render (no tier prop at all) never carries the T9/T10 debug attributes", async () => {
+  const flagOff = await mountFlow(async () => json(verdictResultInCategory("p1", "shampoo")))
+  await scanInto(flagOff)
+  const rootProps = (flagOff.tree as AnyElement).props
+  for (const attribute of SCAN_FLOW_DEBUG_ATTRIBUTES) {
+    assert.equal(attribute in rootProps, false, `expected ${attribute} to be absent for flag-off`)
+  }
+})
+
+test("C4: a free-tier render carries all five T9/T10 debug attributes", async () => {
+  const free = await mountFlow(async () => json(maskedVerdict("p1")), { tier: "free" })
+  await scanInto(free)
+  const rootProps = (free.tree as AnyElement).props
+  for (const attribute of SCAN_FLOW_DEBUG_ATTRIBUTES) {
+    assert.equal(attribute in rootProps, true, `expected ${attribute} to be present for free tier`)
+  }
+  assert.equal(rootProps["data-scan-tier"], "free")
 })

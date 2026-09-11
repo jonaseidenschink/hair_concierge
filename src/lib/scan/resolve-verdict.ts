@@ -298,6 +298,9 @@ function alternativesFrom(
       netContentLabel: product?.presentation?.netContentLabel ?? null,
       verdict: candidate.verdict,
       verdictLabel: SCAN_VERDICT_COPY[candidate.verdict].label,
+      // T8: already computed by `buildStage3FitComparison` — carried through for the
+      // free-tier masked serializer only, see `ScanAlternative.criteria`.
+      criteria: candidate.criteria,
     }
   })
 }

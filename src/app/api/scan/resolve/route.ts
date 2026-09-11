@@ -3,18 +3,18 @@ import { after } from "next/server"
 import { z } from "zod"
 
 import { CATEGORY_COPY } from "@/components/personal-plan-products/stage3-product-copy"
-import { ROLE_SENSITIVE_CANDIDATE_CATEGORIES } from "@/lib/personal-plan/product-previews"
-import { CATEGORY_ROLE_POLICIES } from "@/lib/personal-plan/products/authorities"
+import { getEntitlements } from "@/lib/entitlements"
+import { resolvePaidAppAccess, type FreemiumAccessResult } from "@/lib/entitlements/access"
+import { hasUsedFreeReveal } from "@/lib/entitlements/free-reveal"
+import { isFreemiumScannerFirstEnabled } from "@/lib/entitlements/flag"
 import {
   loadScanProductFacts,
   loadStage3RecommendationCandidatesByRole,
-  type CategorySelectionContext,
 } from "@/lib/personal-plan/products/authority/catalog-facts"
 import {
   PERSONAL_PLAN_PRODUCT_CATEGORIES,
   type PersonalPlanCategory,
 } from "@/lib/personal-plan/products/contracts"
-import type { PlanProductRole } from "@/lib/personal-plan/types"
 import { normalizeIdentifierValue } from "@/lib/product-identity/normalize"
 import { checkRateLimit } from "@/lib/rate-limit"
 import {
@@ -33,17 +33,21 @@ import {
 import {
   presentScanVerdictPayload,
   toScanProductHeader,
+  withEligibleAlternatives,
   type ScanCatalogPresentationRow,
 } from "@/lib/scan/product-presentation"
+import { loadScanVerdictForProduct } from "@/lib/scan/load-scan-verdict"
+import { maskScanVerdictPayload, type ScanMaskedVerdictResult } from "@/lib/scan/masked-alternative"
 import { loadScanEvaluationContext } from "@/lib/scan/profile-context"
-import { buildScanVerdict, isNotNeeded, type ScanRoleFacts } from "@/lib/scan/resolve-verdict"
+import { buildScanVerdict } from "@/lib/scan/resolve-verdict"
 import { createScanRoute, parseJsonBody, scanFail, scanOk } from "@/lib/scan/route"
 import { loadScanSavedState } from "@/lib/scan/saved-state"
-import type { ScanResolveResult, ScanVerdictPayload } from "@/lib/scan/types"
+import type { ScanResolveResult, ScanResolvedVerdictResult } from "@/lib/scan/types"
 import { SCAN_PENDING_SUBMISSION_HEADLINE } from "@/lib/scan/verdict-labels"
 import { captureScanException } from "@/lib/observability/scan"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { createClient } from "@/lib/supabase/server"
+import { isPersonalPlanFieldTestGuest } from "@/lib/supabase/middleware"
 
 /**
  * v1 API surface only ever needs "ean" (ruling R9): the scanner emits ean_13/ean_8 and
@@ -94,6 +98,16 @@ export type ScanResolveRouteDeps = {
     client: SupabaseClient,
     productIds: string[],
   ) => Promise<ScanCatalogPresentationRow[]>
+  /**
+   * Freemium scanner-first (T8): the same paid-access composite `requirePremiumAccess`
+   * uses on save/wishlist (see access.ts). Only consulted when the flag is on AND the
+   * verdict is `in_catalog` (nothing to mask otherwise) — flag-off and premium responses
+   * never call this, so they stay byte-identical to before T8.
+   */
+  resolvePaidAccess: (userId: string) => Promise<FreemiumAccessResult>
+  /** T7 accessor, called with the admin `client` already in scope — never a user-scoped
+   * client, or RLS hides the row and this reports "unused" forever. */
+  hasUsedFreeReveal: typeof hasUsedFreeReveal
   captureScanException?: typeof captureScanException
   /**
    * Injection seam for Next's `after`, which throws outside a request scope. Tests pass a
@@ -355,88 +369,24 @@ export function createScanResolveRouteHandler(deps: ScanResolveRouteDeps) {
       const decision = context.snapshot.decisions.find((entry) => entry.category === category)
       if (!decision) throw new Error("scan_resolve_decision_missing")
 
-      const shampooTarget =
-        category === "shampoo" && decision.target?.category === "shampoo" ? decision.target : null
-      const conditionerTarget =
-        category === "conditioner" && decision.target?.category === "conditioner"
-          ? decision.target
-          : null
-
-      /**
-       * `buildScanVerdict` evaluates EVERY role of the decision, but a category's derived
-       * facts are identical for all of its roles except Shampoo, where `selectShampooSpec`
-       * picks the spec row by the role's expected bucket/scalp route. So mirror
-       * `product-previews.ts`: one shared load for every other category, per-role facts for
-       * a role-sensitive one — otherwise e.g. the dandruff role would be graded against
-       * facts loaded for the everyday role.
-       *
-       * The candidate POOL is role-independent, so it is loaded exactly once for all roles
-       * and only re-specced per role inside `loadStage3RecommendationCandidatesByRole` (F12).
-       * The scanned product's own facts are still one small load per role.
-       */
-      const primaryRole = decision.roles[0] ?? CATEGORY_ROLE_POLICIES[category].allowedRoles[0]
-      const roleSensitive = ROLE_SENSITIVE_CANDIDATE_CATEGORIES.has(category)
-      const rolesToLoad = roleSensitive
-        ? [...new Set<PlanProductRole>([primaryRole, ...decision.roles])]
-        : [primaryRole]
-      const hairThickness = context.snapshot.profile.hair.thickness
-      const selectionContextFor = (role: PlanProductRole): CategorySelectionContext => ({
-        hairThickness,
-        role,
-        shampooTarget,
-        conditionerTarget,
-      })
-
+      // T8: facts-loading + `buildScanVerdict` extracted to `load-scan-verdict.ts`, shared
+      // with `/api/scan/reveal` — see that module for why. The `onEnterVerdictStage`
+      // callback (fix round 1, F4) restores the original two-stage telemetry split: a
+      // throw during facts-loading still reports "product_facts", a throw inside
+      // `buildScanVerdict` itself now reports "verdict" again instead of collapsing both
+      // into one stage.
       attempt.failureStage = "product_facts"
-      const [productFactsByRole, candidatesByRole] = await Promise.all([
-        Promise.all(
-          rolesToLoad.map(
-            async (role) =>
-              [
-                role,
-                await deps.loadScanProductFacts(
-                  client,
-                  category,
-                  productId,
-                  selectionContextFor(role),
-                ),
-              ] as const,
-          ),
-        ),
-        isNotNeeded(decision)
-          ? Promise.resolve(Object.fromEntries(rolesToLoad.map((role) => [role, []])))
-          : deps.loadRecommendationCandidates(client, {
-              category,
-              hairThickness,
-              shampooTarget,
-              conditionerTarget,
-              roles: rolesToLoad,
-            }),
-      ])
-      const loadedFacts = new Map<PlanProductRole, ScanRoleFacts>(
-        productFactsByRole.map(([role, productFacts]) => {
-          const recommendationCandidates = candidatesByRole[role]
-          if (!recommendationCandidates) throw new Error("scan_resolve_candidates_role_missing")
-          return [role, { productFacts, recommendationCandidates }]
-        }),
-      )
-      const primaryFacts = loadedFacts.get(primaryRole) as ScanRoleFacts
-
-      attempt.failureStage = "verdict"
-      const verdict = deps.buildScanVerdict({
+      const verdict = await loadScanVerdictForProduct(
+        client,
+        deps,
         category,
+        productId,
         decision,
-        productFacts: primaryFacts.productFacts,
-        recommendationCandidates: primaryFacts.recommendationCandidates,
-        perRoleFacts: roleSensitive ? Object.fromEntries(loadedFacts) : undefined,
-        coverage: context.snapshot.coverage,
-        hairThickness: context.snapshot.profile.hair.thickness,
-        // No Stage3ProductDraft exists for scan — mirrors product-previews.ts's no-draft
-        // default for heat-carrier coverage instead of computing a real one.
-        heatCarrierCoverage: { carrierCategory: null, verifiedRoutes: [] },
-        refinedVersionId: context.refinedVersionId,
-        refinedInputHash: context.refinedInputHash,
-      })
+        context,
+        () => {
+          attempt.failureStage = "verdict"
+        },
+      )
 
       // One catalog read covers the sheet's product header and the alternatives' brand +
       // purchase link — neither exists on the authority facts the verdict is built from.
@@ -464,42 +414,58 @@ export function createScanResolveRouteHandler(deps: ScanResolveRouteDeps) {
       )
 
       attempt.failureStage = "response_build"
-      const result = {
+      const productHeader = toScanProductHeader(scannedRow)
+      const resolvedOutcome = (): ResolveTerminalOutcome =>
+        eligibleVerdict.kind === "in_catalog" && eligibleVerdict.verdict === "unknown"
+          ? "verdict_unknown"
+          : "resolved"
+
+      // Freemium scanner-first (T8): masking only ever applies to an `in_catalog`
+      // verdict's alternatives, and only with the flag on — flag-off or a `not_needed`
+      // verdict never call `resolvePaidAccess` at all, so neither performs a billing
+      // lookup it didn't before T8 (mirrors the F1a "inert with the flag off" pattern on
+      // `hasFreemiumPaidAccess`). Premium falls through to the untouched full path below.
+      //
+      // Fail-closed constraint (fix round 1, F3): `resolvePaidAccess` returning
+      // "unavailable" 503s every `in_catalog` verdict here, premium included — an
+      // entitlement-source outage must never be treated as "unmask," so this is the one
+      // case where "flag on + premium ⇒ byte-identical" does not hold.
+      if (isFreemiumScannerFirstEnabled() && eligibleVerdict.kind === "in_catalog") {
+        const access = await deps.resolvePaidAccess(userId)
+        if (access === "unavailable") throw new Error("scan_resolve_entitlements_unavailable")
+
+        // Fix round 1 (F2): the brief names `getEntitlements(...).canSeeAlternatives` as
+        // the deciding signal, not the raw `resolvePaidAccess` result — same module the
+        // reveal route now also branches on, so a future ruling that grants some free
+        // cohort alternatives only has one place to change.
+        const entitlements = await getEntitlements(userId, {
+          hasAppAccess: async () => access === "allowed",
+          readFreeRevealUsed: (id) => deps.hasUsedFreeReveal(client, id),
+        })
+
+        if (!entitlements.canSeeAlternatives) {
+          const maskedResult: ScanMaskedVerdictResult = {
+            ...maskScanVerdictPayload(eligibleVerdict),
+            product: productHeader,
+            snapshotSource: context.snapshotSource,
+            savedState,
+            freeRevealAvailable: entitlements.freeRevealAvailable,
+          }
+          completeAttempt(resolvedOutcome(), null)
+          return scanOk(maskedResult)
+        }
+      }
+
+      const result: ScanResolvedVerdictResult = {
         ...presentScanVerdictPayload(eligibleVerdict, presentationRows),
-        product: toScanProductHeader(scannedRow),
+        product: productHeader,
         snapshotSource: context.snapshotSource,
         savedState,
       }
-      completeAttempt(
-        eligibleVerdict.kind === "in_catalog" && eligibleVerdict.verdict === "unknown"
-          ? "verdict_unknown"
-          : "resolved",
-        null,
-      )
+      completeAttempt(resolvedOutcome(), null)
       return scanOk(result)
     },
   })
-}
-
-/**
- * Drops disposition-quarantined products from an `in_catalog` verdict's alternatives.
- * Leaving the list empty is fine — the sheet only renders the section when it has entries.
- */
-async function withEligibleAlternatives(
-  verdict: ScanVerdictPayload,
-  loadQuarantined: (productIds: string[]) => Promise<Set<string>>,
-): Promise<ScanVerdictPayload> {
-  if (verdict.kind !== "in_catalog" || verdict.alternatives.length === 0) return verdict
-  const quarantined = await loadQuarantined(
-    verdict.alternatives.map((alternative) => alternative.productId),
-  )
-  if (quarantined.size === 0) return verdict
-  return {
-    ...verdict,
-    alternatives: verdict.alternatives.filter(
-      (alternative) => !quarantined.has(alternative.productId),
-    ),
-  }
 }
 
 async function loadActiveProductById(
@@ -579,4 +545,22 @@ export const POST = createScanResolveRouteHandler({
   buildScanVerdict,
   loadActiveProductById,
   loadPresentationRows,
+  resolvePaidAccess: resolvePaidAccessForCurrentUser,
+  hasUsedFreeReveal,
 })
+
+/**
+ * Separate from `getUserId`: the shared scan wrapper only forwards a userId string to the
+ * handler (`ScanRouteContext`), so the email + `access_kind` `resolvePaidAppAccess` needs
+ * (mirrors the C1/F1 fixes on the save/wishlist guard, access.ts) have no path from
+ * `getUserId` alone without a second `auth.getUser()` read — a deliberate, request-scoped
+ * read, same as `requirePremiumAccessForCurrentUser` on the save route.
+ */
+async function resolvePaidAccessForCurrentUser(userId: string): Promise<FreemiumAccessResult> {
+  const { data } = await (await createClient()).auth.getUser()
+  return resolvePaidAppAccess(
+    userId,
+    data.user?.email,
+    isPersonalPlanFieldTestGuest(data.user ?? {}),
+  )
+}
