@@ -148,7 +148,13 @@ test("the example content sits inside the one in-frame scroll container", () => 
 
   // Keyboard users must be able to reach and scroll the region.
   assert.equal(scroll.props.role, "region")
-  assert.equal(scroll.props["aria-label"], EXAMPLE_LABEL)
+  // T11 review F2 (final cleanup batch): the region's name REFERENCES the visible
+  // „Beispiel" band instead of repeating its text in a separate `aria-label` — a screen
+  // reader announced the same string twice back to back before this.
+  assert.equal(scroll.props["aria-label"], undefined)
+  const label = requireByData(tree, "data-gated-preview-label")
+  assert.equal(scroll.props["aria-labelledby"], label.props.id)
+  assert.ok(label.props.id, "the band needs an id for the region to reference")
   assert.equal(scroll.props.tabIndex, 0)
 
   const child = findByData(scroll, "data-example-child")

@@ -5,6 +5,7 @@ import {
   type PayPalWebhookEvent,
 } from "../src/lib/paypal/webhook-handlers"
 import type { BillingSubscriptionRow } from "../src/lib/billing/types"
+import type { FreemiumProvisioningResult } from "../src/lib/freemium/plan-provisioning"
 import type { PayPalSubscription } from "../src/lib/paypal/subscription-shapes"
 import { toBillingSubscriptionInputFromPayPal } from "../src/lib/paypal/subscription-shapes"
 
@@ -1203,6 +1204,265 @@ test("quarantined reactivation sale is acknowledged without purchase analytics",
 
   assert.deepEqual(result, { handled: true })
   assert.equal(analyticsOutbox.length, 0)
+})
+
+/* ------------------------------------------------------------------------- *
+ * The Premium sheet's freemium lane, wired into this handler (docket rework).
+ *
+ * The buyer these tests exist for approves in the PayPal popup and closes the tab. No
+ * completion call ever runs, so the webhook is the ONLY thing standing between a verified
+ * payment and a Personal Plan. Everything below drives the real handler — activation,
+ * binding, entitlement mirroring — and only the provisioning service itself is faked.
+ * ------------------------------------------------------------------------- */
+
+/** The buyer's own account, resolved by the subscriber e-mail the activation reads. */
+const SHEET_PROFILES = { "user-1": { id: "user-1", email: "paypal@example.com" } }
+
+function premiumSheetIntent(patch: Record<string, unknown> = {}) {
+  return checkoutIntent({
+    id: "intent-sheet",
+    source: "premium_sheet",
+    status: "created",
+    provider_subscription_id: null,
+    user_id: "user-1",
+    ...patch,
+  })
+}
+
+function recordingFreemiumDeps(
+  provision?: (input: {
+    userId: string
+    providerReference: string
+  }) => Promise<FreemiumProvisioningResult>,
+) {
+  const calls: { userId: string; providerReference: string }[] = []
+  return {
+    calls,
+    deps: {
+      freemiumEnabled: () => true,
+      provisionFreemiumPurchase: async (input: { userId: string; providerReference: string }) => {
+        calls.push(input)
+        return (await provision?.(input)) ?? PROVISIONED
+      },
+      captureFreemiumProvisioningException: (() => {}) as never,
+    },
+  }
+}
+
+const PROVISIONED: FreemiumProvisioningResult = {
+  outcome: "provisioned",
+  enrollmentSourceId: "admission-1",
+  personalPlanId: "plan-1",
+  needVersionId: "need-1",
+  routineAccepted: true,
+}
+
+test("approve-then-close: the PayPal activation alone provisions the sheet buyer's plan", async () => {
+  const { supabase, billing, profiles } = createSupabaseStub({
+    paypalIntents: [premiumSheetIntent()],
+    profiles: { ...SHEET_PROFILES },
+  })
+  const { calls, deps } = recordingFreemiumDeps()
+
+  const result = await handlePayPalWebhookEvent(
+    event("WH-sheet-activated", "BILLING.SUBSCRIPTION.ACTIVATED"),
+    {
+      supabase,
+      premiumTierId: "tier-premium",
+      freeTierId: "tier-free",
+      retrievePayPalSubscription: async () => subscription("ACTIVE", futureIso(30)),
+      ...deps,
+    },
+  )
+
+  assert.deepEqual(result, { handled: true })
+  // Entitlement AND plan: the provider reference is the subscription id, which is exactly
+  // what the sheet's completion endpoint provisions against — one admission for both lanes.
+  assert.deepEqual(calls, [{ userId: "user-1", providerReference: "I-active" }])
+  assert.equal(billing[0].entitlement_status, "active")
+  assert.equal(profiles["user-1"].subscription_tier_id, "tier-premium")
+})
+
+test("a legacy PayPal activation provisions nothing — admission is never inferred", async () => {
+  for (const intent of [checkoutIntent({ provider_subscription_id: null, status: "created" })]) {
+    const { supabase, billing } = createSupabaseStub({
+      paypalIntents: [intent],
+      profiles: { ...SHEET_PROFILES },
+    })
+    const { calls, deps } = recordingFreemiumDeps()
+
+    await handlePayPalWebhookEvent(event("WH-legacy-activated", "BILLING.SUBSCRIPTION.ACTIVATED"), {
+      supabase,
+      premiumTierId: "tier-premium",
+      freeTierId: "tier-free",
+      retrievePayPalSubscription: async () => subscription("ACTIVE", futureIso()),
+      ...deps,
+    })
+
+    // Byte-identical to the pre-rework path: entitlement mirrored, nothing else touched.
+    assert.deepEqual(calls, [])
+    assert.equal(billing[0].entitlement_status, "active")
+  }
+})
+
+test("the sheet's own PayPal purchase provisions nothing while the flag is off", async () => {
+  const { supabase, billing } = createSupabaseStub({
+    paypalIntents: [premiumSheetIntent()],
+    profiles: { ...SHEET_PROFILES },
+  })
+  const { calls, deps } = recordingFreemiumDeps()
+
+  await handlePayPalWebhookEvent(event("WH-sheet-flag-off", "BILLING.SUBSCRIPTION.ACTIVATED"), {
+    supabase,
+    premiumTierId: "tier-premium",
+    freeTierId: "tier-free",
+    retrievePayPalSubscription: async () => subscription("ACTIVE", futureIso()),
+    ...deps,
+    freemiumEnabled: () => false,
+  })
+
+  assert.deepEqual(calls, [])
+  assert.equal(billing[0].entitlement_status, "active")
+})
+
+test("an intent naming a different account unlocks nobody, and does not fail the delivery", async () => {
+  // The plan's `enrollment_purchase_source_id` pin is permanent, so provisioning the intent's
+  // user while PayPal's own subscriber identity resolved another account is unrecoverable.
+  const { supabase, billing } = createSupabaseStub({
+    paypalIntents: [premiumSheetIntent({ user_id: "someone-else" })],
+    profiles: { ...SHEET_PROFILES },
+  })
+  const { calls, deps } = recordingFreemiumDeps()
+
+  const result = await handlePayPalWebhookEvent(
+    event("WH-sheet-mismatch", "BILLING.SUBSCRIPTION.ACTIVATED"),
+    {
+      supabase,
+      premiumTierId: "tier-premium",
+      freeTierId: "tier-free",
+      retrievePayPalSubscription: async () => subscription("ACTIVE", futureIso()),
+      ...deps,
+    },
+  )
+
+  assert.deepEqual(result, { handled: true })
+  assert.deepEqual(calls, [])
+  assert.equal(billing[0].entitlement_status, "active")
+})
+
+test("a failed provisioning fails the delivery, releases the claim, and the redelivery converges", async () => {
+  const {
+    supabase,
+    calls: dbCalls,
+    billing,
+  } = createSupabaseStub({
+    paypalIntents: [premiumSheetIntent()],
+    profiles: { ...SHEET_PROFILES },
+  })
+  let attempts = 0
+  const { calls, deps } = recordingFreemiumDeps(async () => {
+    attempts += 1
+    if (attempts === 1) throw new Error("provisioning down")
+    return PROVISIONED
+  })
+  const activated = event("WH-sheet-retry", "BILLING.SUBSCRIPTION.ACTIVATED")
+  const handlerDeps = {
+    supabase,
+    premiumTierId: "tier-premium",
+    freeTierId: "tier-free",
+    retrievePayPalSubscription: async () => subscription("ACTIVE", futureIso()),
+    ...deps,
+  }
+
+  await assert.rejects(
+    () => handlePayPalWebhookEvent(activated, handlerDeps),
+    /freemium PayPal provisioning must be retried \(provisioning_error\)/,
+  )
+  // The claim has to be gone, or PayPal's redelivery would be dropped as a duplicate and the
+  // buyer would stay paid-and-planless forever — the exact failure this lane exists to close.
+  assert.equal(
+    dbCalls.some((call) => call.table === "billing_webhook_events" && call.op === "delete"),
+    true,
+  )
+
+  await handlePayPalWebhookEvent(activated, handlerDeps)
+
+  assert.deepEqual(calls, [
+    { userId: "user-1", providerReference: "I-active" },
+    { userId: "user-1", providerReference: "I-active" },
+  ])
+  assert.equal(billing.length, 1)
+})
+
+test("a plan with no accepted Routine demands a redelivery instead of reporting success", async () => {
+  const { supabase } = createSupabaseStub({
+    paypalIntents: [premiumSheetIntent()],
+    profiles: { ...SHEET_PROFILES },
+  })
+  const { deps } = recordingFreemiumDeps(async () => ({ ...PROVISIONED, routineAccepted: false }))
+
+  await assert.rejects(
+    () =>
+      handlePayPalWebhookEvent(event("WH-sheet-no-routine", "BILLING.SUBSCRIPTION.ACTIVATED"), {
+        supabase,
+        premiumTierId: "tier-premium",
+        freeTierId: "tier-free",
+        retrievePayPalSubscription: async () => subscription("ACTIVE", futureIso()),
+        ...deps,
+      }),
+    /routine_not_accepted/,
+  )
+})
+
+test("a blocked provisioning is reported but acknowledged — a redelivery cannot fix it", async () => {
+  const { supabase } = createSupabaseStub({
+    paypalIntents: [premiumSheetIntent()],
+    profiles: { ...SHEET_PROFILES },
+  })
+  const { deps } = recordingFreemiumDeps(async () => ({ outcome: "no_quiz_artifact" }))
+
+  const result = await handlePayPalWebhookEvent(
+    event("WH-sheet-blocked", "BILLING.SUBSCRIPTION.ACTIVATED"),
+    {
+      supabase,
+      premiumTierId: "tier-premium",
+      freeTierId: "tier-free",
+      retrievePayPalSubscription: async () => subscription("ACTIVE", futureIso()),
+      ...deps,
+    },
+  )
+
+  assert.deepEqual(result, { handled: true })
+})
+
+test("the initial sale is a second chance at provisioning; a later renewal is not", async () => {
+  const { supabase } = createSupabaseStub({
+    paypalIntents: [premiumSheetIntent({ provider_subscription_id: "I-active" })],
+    profiles: { ...SHEET_PROFILES },
+  })
+  const { calls, deps } = recordingFreemiumDeps()
+  const handlerDeps = {
+    supabase,
+    premiumTierId: "tier-premium",
+    freeTierId: "tier-free",
+    retrievePayPalSubscription: async () => subscription("ACTIVE", futureIso()),
+    recordBillingAnalytics: true,
+    defer: () => undefined,
+    ...deps,
+  }
+
+  await handlePayPalWebhookEvent(paymentEvent("WH-sheet-sale", "PAYMENT.SALE.COMPLETED"), {
+    ...handlerDeps,
+  })
+  assert.deepEqual(calls, [{ userId: "user-1", providerReference: "I-active" }])
+
+  // A renewal quarter later: the same subscription, the same intent row — but the intent's
+  // 24h window is long gone, so this sale is not a purchase and re-enters nothing.
+  const renewal = paymentEvent("WH-sheet-renewal", "PAYMENT.SALE.COMPLETED")
+  renewal.create_time = new Date(Date.now() + 90 * 86_400_000).toISOString()
+  await handlePayPalWebhookEvent(renewal, handlerDeps)
+
+  assert.equal(calls.length, 1)
 })
 
 function checkoutIntent(patch: Record<string, unknown> = {}) {

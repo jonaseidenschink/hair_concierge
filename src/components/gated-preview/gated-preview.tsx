@@ -57,6 +57,11 @@ export function GatedPreview({
   children,
 }: GatedPreviewProps) {
   const [sheetOpen, setSheetOpen] = useState(false)
+  // T11 review F2 (final cleanup batch): the region's accessible name REFERENCES the
+  // visible „Beispiel" band instead of repeating its text in a separate `aria-label` — a
+  // screen reader announced the same string twice back to back (the band's own text, then
+  // the region's name) when it used to duplicate it verbatim.
+  const exampleLabelId = `gated-preview-label-${feature}`
 
   return (
     <section
@@ -69,6 +74,7 @@ export function GatedPreview({
         className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[20px] border border-[var(--brand-plum-light)] bg-card shadow-[0_16px_36px_-32px_rgba(var(--brand-plum-rgb),0.65)]"
       >
         <p
+          id={exampleLabelId}
           data-gated-preview-label="true"
           className="shrink-0 border-b border-[var(--brand-plum-light)] bg-[var(--brand-plum-ice)] px-4 py-2 text-[11px] font-bold uppercase tracking-wide text-[var(--brand-plum-dark)]"
         >
@@ -76,11 +82,13 @@ export function GatedPreview({
         </p>
 
         {/* The one scroll container. `role="region"` + `tabIndex` so a keyboard user can
-            reach and scroll it; `overscroll-contain` keeps the page behind it still. */}
+            reach and scroll it; `overscroll-contain` keeps the page behind it still.
+            `aria-labelledby` points at the band above instead of repeating its text in an
+            `aria-label` (T11 review F2). */}
         <div
           data-gated-preview-scroll="true"
           role="region"
-          aria-label={exampleLabel}
+          aria-labelledby={exampleLabelId}
           tabIndex={0}
           className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-6 pt-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--brand-plum)]"
         >

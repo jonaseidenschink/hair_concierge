@@ -105,6 +105,12 @@ export type AuthenticatedAppNavigationResolverDeps = {
   loadHasAppAccess?: (userId: string) => Promise<boolean>
 }
 
+// Cleanup batch (T3 deferred minor): declared once, ahead of every use below —
+// `freeTierPersonalPlanNavigationAccess` used to reference it before its textual
+// declaration further down the file (harmless, since neither is evaluated until called,
+// but a top-to-bottom read made it look forward-referenced for no reason).
+const EMPTY_UNVISITED_NAV_SURFACES: ReadonlySet<PersonalPlanNavSurface> = new Set()
+
 export function toAuthenticatedAppNavigationAccess(
   access: PersonalPlanJourneyAccess,
   navVisitedState?: NavSurfaceVisitedState,
@@ -159,8 +165,6 @@ function freeTierPersonalPlanNavigationAccess(): AuthenticatedAppNavigationAcces
     tier: "free",
   }
 }
-
-const EMPTY_UNVISITED_NAV_SURFACES: ReadonlySet<PersonalPlanNavSurface> = new Set()
 
 /**
  * Whether `/routine` is a real destination for this user rather than the

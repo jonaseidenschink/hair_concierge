@@ -67,6 +67,11 @@ export type PremiumSheetPurchaseFailure =
   | "checkout_expired"
   /** The buyer came back without paying — Stripe still reports the Session as `open`. */
   | "checkout_abandoned"
+  /**
+   * PayPal's duplicate guard cancelled this second subscription because the account
+   * already had an active one. Terminal for this attempt, and the buyer loses nothing.
+   */
+  | "subscription_already_active"
 
 export type PremiumSheetPurchaseEvent =
   | { type: "checkout_requested"; interval: BillingInterval; attemptId: string }

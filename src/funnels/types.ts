@@ -10,6 +10,11 @@ export type FunnelLandingVariantProps = {
   personalPlanQuizResume?: PersonalPlanQuizResumeBootstrap
   personalPlanFieldTest?: boolean
   moderatorQuiz?: { scope: string; email: string } | null
+  /**
+   * Freemium scanner-first flag, resolved server-side (the flag helper is not
+   * Edge/browser-safe). Off by default, so the current funnel is untouched.
+   */
+  freemiumScannerFirst?: boolean
 }
 
 export type FunnelLandingVariantComponent = ComponentType<FunnelLandingVariantProps>

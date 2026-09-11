@@ -6,12 +6,14 @@ export default function FunnelPersonalPlanQuizLandingVariant({
   personalPlanFieldTest = false,
   personalPlanQuizResume,
   moderatorQuiz = null,
+  freemiumScannerFirst = false,
 }: FunnelLandingVariantProps) {
   return (
     <ModeratorQuizProvider value={moderatorQuiz}>
       <PersonalPlanQuizEntry
         key={moderatorQuiz?.scope}
         fieldTest={personalPlanFieldTest}
+        freemiumScannerFirst={freemiumScannerFirst}
         resume={personalPlanQuizResume}
       />
     </ModeratorQuizProvider>

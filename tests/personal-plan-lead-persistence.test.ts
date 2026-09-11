@@ -800,3 +800,85 @@ test("moderator completion atomically binds the account and suppresses marketing
     else process.env.PERSONAL_PLAN_RESULT_RETURN_ENABLED = previousReturn
   }
 })
+
+// --- PR6 Codex review, finding V1 (CRITICAL) --------------------------------
+//
+// `save_personal_plan_lead_with_artifact` DEDUPLICATES: an identical
+// (e-mail, canonical answers) submission inside 15 minutes returns the EXISTING
+// lead with `reused = true` instead of inserting one (migration
+// 20260728130000, "leads.created_at >= now() - interval '15 minutes'"), and so
+// does a replayed artifact claim. Minting the free-registration correction
+// capability on that response handed an attacker who submits a victim's address
+// with matching answers the VICTIM's lead id together with authority to repoint
+// that lead at the attacker's own address.
+test("ATTACK V1: a REUSED lead never receives a free-registration correction capability", async () => {
+  const previousQuizFlag = process.env.PERSONAL_PLAN_QUIZ_V1_ENABLED
+  const previousSecret = process.env.FUNNEL_COOKIE_SIGNING_SECRET
+  process.env.PERSONAL_PLAN_QUIZ_V1_ENABLED = "true"
+  process.env.FUNNEL_COOKIE_SIGNING_SECRET = "v1-attack-test-signing-secret-long-enough"
+
+  const VICTIM_LEAD_ID = "10000000-0000-4000-8000-000000000011"
+  const createHandler = (reused: boolean | undefined) =>
+    createPersonalPlanLeadPostHandler({
+      resolveModeratorJourney: async () => ({ kind: "ordinary" }),
+      checkRateLimit: async () => ({ allowed: true }),
+      checkEmailDeliverability: async () => ({
+        ok: true,
+        normalized: "opfer@example.com",
+        outcome: "mx",
+      }),
+      recordEmailDeliverabilityOutcome: () => {},
+      cookies: (async () => ({ get: () => undefined })) as typeof import("next/headers").cookies,
+      scheduleAfter: (() => undefined) as typeof import("next/server").after,
+      enqueueMetaLead: () => true,
+      isFreemiumScannerFirstEnabled: () => true,
+      createAdminClient: (() => ({
+        rpc: async () => ({
+          data: [
+            reused === undefined
+              ? { lead_id: VICTIM_LEAD_ID }
+              : { lead_id: VICTIM_LEAD_ID, reused },
+          ],
+          error: null,
+        }),
+      })) as unknown as typeof import("../src/lib/supabase/admin").createAdminClient,
+    })
+
+  const post = (handler: ReturnType<typeof createPersonalPlanLeadPostHandler>) =>
+    handler(
+      new Request("https://chaarlie.de/api/quiz/personal-plan-lead", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-forwarded-for": "203.0.113.10" },
+        body: JSON.stringify(request),
+      }),
+    )
+
+  try {
+    // The attacker's replay: the RPC hands back the victim's lead.
+    const reusedBody = (await (await post(createHandler(true))).json()) as Record<string, unknown>
+    assert.equal(reusedBody.leadId, VICTIM_LEAD_ID)
+    assert.equal(
+      "freeRegistrationCapability" in reusedBody,
+      false,
+      "a reused lead must carry NO correction capability",
+    )
+
+    // Fail closed: a response that does not report `reused` at all is treated
+    // as reused rather than as a fresh lead.
+    const silentBody = (await (await post(createHandler(undefined))).json()) as Record<
+      string,
+      unknown
+    >
+    assert.equal("freeRegistrationCapability" in silentBody, false)
+
+    // The genuine completing browser still gets one.
+    const freshBody = (await (await post(createHandler(false))).json()) as Record<string, unknown>
+    assert.equal(freshBody.leadId, VICTIM_LEAD_ID)
+    assert.equal(typeof freshBody.freeRegistrationCapability, "string")
+  } finally {
+    if (previousQuizFlag === undefined) delete process.env.PERSONAL_PLAN_QUIZ_V1_ENABLED
+    else process.env.PERSONAL_PLAN_QUIZ_V1_ENABLED = previousQuizFlag
+    if (previousSecret === undefined) delete process.env.FUNNEL_COOKIE_SIGNING_SECRET
+    else process.env.FUNNEL_COOKIE_SIGNING_SECRET = previousSecret
+  }
+})

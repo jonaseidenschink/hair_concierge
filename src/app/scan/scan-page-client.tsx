@@ -21,20 +21,43 @@ import { scanAnalytics } from "@/lib/scan/scan-analytics"
  * and the router (T16's `navigate` DI seam, so `ScanFlow` never calls `useRouter()` itself
  * — see that prop's doc comment) needed this client boundary.
  */
+/**
+ * Honest notice for the one case where a free magic link deliberately did NOT
+ * adopt the quiz it carried: the account that clicked it already had its own
+ * hair profile, so `/auth/confirm` skipped the binding rather than overwrite it
+ * (T18 fix round 1, review finding W1b). Without a line here the user would just
+ * find themselves logged in with none of the answers they had expected.
+ */
+const BIND_SKIPPED_NOTICE =
+  "Du bist mit deinem bestehenden Konto angemeldet. Deine gespeicherte Haaranalyse bleibt unverändert – die neue wurde nicht übernommen."
+
 export function ScanPageClient({
   tier,
   merklisteEnabled,
+  bindSkippedNotice = false,
 }: {
   tier: EntitlementTier
   merklisteEnabled: boolean
+  bindSkippedNotice?: boolean
 }) {
   const router = useRouter()
   return (
-    <ScanFlow
-      analytics={scanAnalytics}
-      tier={tier}
-      merklisteEnabled={merklisteEnabled}
-      navigate={router.push}
-    />
+    <>
+      {bindSkippedNotice ? (
+        <p
+          className="mx-auto max-w-[36rem] px-5 pt-4 text-sm leading-6 text-[var(--text-sub)]"
+          data-scan-bind-skipped-notice
+          role="status"
+        >
+          {BIND_SKIPPED_NOTICE}
+        </p>
+      ) : null}
+      <ScanFlow
+        analytics={scanAnalytics}
+        tier={tier}
+        merklisteEnabled={merklisteEnabled}
+        navigate={router.push}
+      />
+    </>
   )
 }

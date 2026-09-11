@@ -9,7 +9,15 @@ export type PayPalCheckoutIntentStatus =
   | "activated"
   | "expired"
 
-export type PayPalCheckoutSource = "pricing_page" | "quiz_result_offer"
+/**
+ * `premium_sheet` is the freemium Premium sheet's PayPal lane (docket rework R1) — the
+ * same third entry point Stripe's `create-checkout-session` already knows. It is what
+ * pins the sheet's PayPal plan to the STANDARD catalog server-side, exactly as the
+ * Stripe source does (T13 §11 F06: the launch catalog may diverge, the sheet never
+ * follows it). The DB `CHECK` on `paypal_checkout_intents.source` is widened to match in
+ * `20260911090000_paypal_checkout_intents_premium_sheet_source.sql`.
+ */
+export type PayPalCheckoutSource = "pricing_page" | "quiz_result_offer" | "premium_sheet"
 
 export interface PayPalCheckoutIntentRow {
   id: string

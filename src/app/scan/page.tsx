@@ -1,11 +1,21 @@
 import { redirect } from "next/navigation"
 
 import { loadScanPageTier, loadScanRouteAccess } from "@/lib/auth/authenticated-app-route-access"
+import {
+  FREE_REGISTRATION_BIND_SKIPPED_PARAM,
+  FREE_REGISTRATION_BIND_SKIPPED_VALUE,
+} from "@/lib/auth/free-registration"
+import { recoverMissingFreeSnapshot } from "@/lib/auth/free-registration-recovery"
 import { isFreemiumScannerFirstEnabled } from "@/lib/entitlements/flag"
+import { createClient } from "@/lib/supabase/server"
 
 import { ScanPageClient } from "./scan-page-client"
 
-export default async function ScanPage() {
+export default async function ScanPage({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>
+}) {
   const access = await loadScanRouteAccess()
   if (access.kind === "redirect") redirect(access.href)
 
@@ -27,5 +37,34 @@ export default async function ScanPage() {
   // from `ScanFlow` itself.
   const merklisteEnabled = isFreemiumScannerFirstEnabled()
 
-  return <ScanPageClient tier={tier} merklisteEnabled={merklisteEnabled} />
+  // T18 fix round 1 (review finding W2): a free account whose confirm-time
+  // snapshot provisioning failed used to be permanently stuck on
+  // `profile_missing` with zero telemetry. This is the retry the confirm route's
+  // comment always claimed existed — narrow by construction (flag on, tier
+  // already resolved to `"free"` by the email-aware paid-access composite, and
+  // only when no need version exists) and idempotent. Never allowed to break the
+  // page: the scanner's own missing-profile state is still the fallback.
+  if (merklisteEnabled && tier === "free") {
+    try {
+      const { data } = await (await createClient()).auth.getUser()
+      if (data.user) {
+        await recoverMissingFreeSnapshot({ userId: data.user.id, email: data.user.email })
+      }
+    } catch (error) {
+      console.error("[free-registration] scan-visit provisioning retry failed:", error)
+    }
+  }
+
+  const params = searchParams ? await searchParams : {}
+  const bindSkippedNotice =
+    merklisteEnabled &&
+    params[FREE_REGISTRATION_BIND_SKIPPED_PARAM] === FREE_REGISTRATION_BIND_SKIPPED_VALUE
+
+  return (
+    <ScanPageClient
+      tier={tier}
+      merklisteEnabled={merklisteEnabled}
+      bindSkippedNotice={bindSkippedNotice}
+    />
+  )
 }

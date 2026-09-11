@@ -2,6 +2,7 @@ import type { Metadata } from "next"
 import { cookies } from "next/headers"
 import { notFound, redirect } from "next/navigation"
 import { renderLandingVariant } from "@/funnels/landing/registry"
+import { isFreemiumScannerFirstEnabled } from "@/lib/entitlements/flag"
 import {
   isPersonalPlanQuizCrossBrowserResumeEnabled,
   isPersonalPlanQuizV1Enabled,
@@ -128,6 +129,7 @@ export default async function CampaignLandingPage({
     personalPlanFieldTest,
     personalPlanQuizResume,
     moderatorQuiz,
+    freemiumScannerFirst: isFreemiumScannerFirstEnabled(),
   })
   if (!landingVariant) notFound()
 

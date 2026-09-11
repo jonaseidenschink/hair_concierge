@@ -202,6 +202,10 @@ function evidenceClient(rows: Partial<Record<string, unknown>>, error?: unknown)
   const client = {
     from(table: string) {
       queried.push(table)
+      // V5: the paid-origin filter is applied for real, so a fixture that stands
+      // for a FREE-origin plan row (`enrollment_purchase_source_id: null`) is
+      // invisible to the probe exactly as it is in Postgres.
+      let paidOriginOnly = false
       const query = {
         select: () => query,
         eq: (column: string, value: unknown) => {
@@ -209,11 +213,28 @@ function evidenceClient(rows: Partial<Record<string, unknown>>, error?: unknown)
           assert.equal(value, USER_ID)
           return query
         },
+        not: (column: string, operator: string, value: unknown) => {
+          assert.equal(column, "enrollment_purchase_source_id")
+          assert.equal(operator, "is")
+          assert.equal(value, null)
+          paidOriginOnly = true
+          return query
+        },
         limit: (count: number) => {
           assert.equal(count, 1, `${table} must be an existence probe, not a listing`)
           return query
         },
-        maybeSingle: async () => ({ data: rows[table] ?? null, error: error ?? null }),
+        maybeSingle: async () => {
+          const row = rows[table] ?? null
+          if (
+            paidOriginOnly &&
+            row &&
+            !(row as Record<string, unknown>).enrollment_purchase_source_id
+          ) {
+            return { data: null, error: error ?? null }
+          }
+          return { data: row, error: error ?? null }
+        },
       }
       return query
     },
@@ -221,9 +242,19 @@ function evidenceClient(rows: Partial<Record<string, unknown>>, error?: unknown)
   return { client: client as never, queried }
 }
 
+/** A plan row admitted by a real purchase (T14's pin, or any paid Stage-1 path). */
+const PAID_PLAN_ROW = {
+  id: PLAN_ID,
+  enrollment_purchase_source_id: "40000000-0000-4000-8000-000000000001",
+}
+
 test("Z2: lapsed evidence is ANY paid-era artifact — plan, own Merkliste rows, or own chat", async () => {
-  for (const table of ["personal_plans", "scan_wishlist", "conversations"]) {
-    const { client } = evidenceClient({ [table]: { id: "row-1" } })
+  for (const [table, row] of [
+    ["personal_plans", PAID_PLAN_ROW],
+    ["scan_wishlist", { id: "row-1" }],
+    ["conversations", { id: "row-1" }],
+  ] as const) {
+    const { client } = evidenceClient({ [table]: row })
     assert.equal(
       await hasPersonalPlanKeepsakeEvidence(client, USER_ID),
       true,
@@ -234,7 +265,7 @@ test("Z2: lapsed evidence is ANY paid-era artifact — plan, own Merkliste rows,
   // A routine-less plan row (no accepted Routine version) is now evidence in its own right
   // — the exact cohort the old classifier lost.
   const { client: routineLess } = evidenceClient({
-    personal_plans: { id: PLAN_ID, active_routine_version_id: null },
+    personal_plans: { ...PAID_PLAN_ROW, active_routine_version_id: null },
   })
   assert.equal(await hasPersonalPlanKeepsakeEvidence(routineLess, USER_ID), true)
 
@@ -244,8 +275,33 @@ test("Z2: lapsed evidence is ANY paid-era artifact — plan, own Merkliste rows,
   assert.deepEqual(queried, ["personal_plans", "scan_wishlist", "conversations"])
 })
 
+// --- PR6 Codex review, finding V5 (cross-PR) --------------------------------
+//
+// T18's free registration provisions an initial need snapshot at `/auth/confirm`, and the
+// RPC that writes it CREATES the `personal_plans` row. Counting any such row as paid-era
+// evidence classified a brand-new free registrant as LAPSED — keepsake views and „Noch
+// keine Routine" instead of the approved Beispiel pages and upgrade CTAs.
+test("V5: a fresh FREE registrant's own plan row is not paid-era evidence", async () => {
+  // Exactly what T6/T18 write: the plan exists, its enrollment source is null.
+  const { client: freshFree, queried } = evidenceClient({
+    personal_plans: { id: PLAN_ID, enrollment_purchase_source_id: null },
+  })
+  assert.equal(
+    await hasPersonalPlanKeepsakeEvidence(freshFree, USER_ID),
+    false,
+    "a free-origin plan row must not promote a new registrant into the lapsed cohort",
+  )
+  // And the probe does not stop there — it goes on to ask the other two.
+  assert.deepEqual(queried, ["personal_plans", "scan_wishlist", "conversations"])
+
+  // The same free registrant after a purchase: T14's pin moves the column off
+  // null, and the row becomes evidence.
+  const { client: afterPurchase } = evidenceClient({ personal_plans: PAID_PLAN_ROW })
+  assert.equal(await hasPersonalPlanKeepsakeEvidence(afterPurchase, USER_ID), true)
+})
+
 test("Z2: the evidence probes short-circuit on the first hit and surface query errors", async () => {
-  const { client, queried } = evidenceClient({ personal_plans: { id: PLAN_ID } })
+  const { client, queried } = evidenceClient({ personal_plans: PAID_PLAN_ROW })
   await hasPersonalPlanKeepsakeEvidence(client, USER_ID)
   assert.deepEqual(queried, ["personal_plans"], "no further reads once the era is proven")
 

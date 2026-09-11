@@ -161,6 +161,7 @@ export function PayPalSubscriptionButton({
   checkoutContext,
   interval,
   leadId,
+  onApproved,
   onCheckoutCancelled,
   onCheckoutFailed,
   onClientMounted,
@@ -177,6 +178,20 @@ export function PayPalSubscriptionButton({
   checkoutContext?: CheckoutContext
   interval: BillingInterval
   leadId?: string | null
+  /**
+   * Completion routing override (docket rework R1). PayPal's approval comes back through
+   * this component's own `onApprove` CALLBACK, not a redirect — so the single thing that
+   * decides where the buyer ends up is the last line of that callback.
+   *
+   * Absent (the offer page, the payment modal, every existing mount): the server-verified
+   * approval navigates to `/welcome?provider=paypal&token=…`, byte-identical to before.
+   *
+   * Present (the Premium sheet): the same verified approval is handed back instead, with
+   * the intent token, and the caller finishes in place. Nothing else about the button —
+   * intent creation, approval, duplicate handling, observability, the error surfaces —
+   * differs between the two mounts.
+   */
+  onApproved?: (token: string) => void
   onCheckoutCancelled?: () => void
   onCheckoutFailed?: (failure: CheckoutFailure) => void
   onClientMounted?: () => void
@@ -724,7 +739,10 @@ export function PayPalSubscriptionButton({
               paypalSubscriptionId: data.subscriptionID,
               paypalTokenPresent: true,
             })
-            window.location.assign(buildPayPalWelcomeUrl(token))
+            // The ONLY divergence between the offer page's mount and the Premium sheet's
+            // (docket rework R1). Without the override this is the historical navigation.
+            if (onApproved) onApproved(token)
+            else window.location.assign(buildPayPalWelcomeUrl(token))
           }}
           onCancel={() => {
             onCheckoutLifecycle?.({

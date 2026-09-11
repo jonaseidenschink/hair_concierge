@@ -87,7 +87,7 @@ export const SCAN_RESOLVING_SUBLINE = "Passt es zu deinem Haar?"
  * `reveal_succeeded` ever carries an empty list (fix round 1, F4) — one string, so the two
  * surfaces can never drift apart.
  */
-export const SCAN_REVEAL_EMPTY_NOTICE = "Gerade keine Alternative verfügbar."
+export const SCAN_REVEAL_EMPTY_NOTICE = "Aktuell keine Alternative gefunden."
 
 /**
  * `POST /api/scan/resolve` and `POST /api/scan/submit`: an open submission exists.

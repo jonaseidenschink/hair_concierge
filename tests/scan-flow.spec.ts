@@ -793,7 +793,7 @@ test.describe("/scan client flow (fake camera + fake detector)", () => {
       await expect(masked.getByText(label)).toBeVisible()
     }
     await expect(masked.getByText("2 von 4 Prüfpunkten im Ziel")).toBeVisible()
-    await expect(masked.getByText("Produkt verdeckt")).toBeVisible()
+    await expect(masked.getByText("Noch verdeckt")).toBeVisible()
     await expect(page.getByText(REVEALED_ALTERNATIVE_NAME)).toHaveCount(0)
     // Ruling 2026-09-09: no „Warum?" affordance anywhere on a verdict.
     await expect(page.getByRole("button", { name: /Warum/ })).toHaveCount(0)

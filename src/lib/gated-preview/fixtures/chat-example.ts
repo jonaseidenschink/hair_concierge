@@ -60,6 +60,6 @@ export const GATED_CHAT_EXAMPLE_MESSAGES: Message[] = [
     id: "example-4",
     role: "assistant",
     content:
-      "Dann liegt es meistens am Leave-in: Es gehört ins handtuchfeuchte Haar, nicht ins trockene.\n\nProbier das zwei Wochen. Wenn sich nichts ändert, sag Bescheid — dann gehen wir deine Routine der Reihe nach durch.",
+      "Dann liegt es meistens am Leave-in: Es gehört ins handtuchfeuchte Haar, nicht ins trockene.\n\nProbier das zwei Wochen. Ändert sich nichts, gehen wir deine Routine der Reihe nach durch.",
   }),
 ]

@@ -8,6 +8,15 @@ import { captureServerPaymentFailure } from "@/lib/observability/payment-server"
 import { resolvePaymentRuntime } from "@/lib/billing/payment-runtime-config"
 
 export const runtime = "nodejs"
+/**
+ * Matches the Stripe webhook's ceiling. The handler now awaits the Premium sheet's freemium
+ * provisioning inside the response (`provisionPremiumSheetPurchase`), and its own 20s budget
+ * only protects the buyer if the platform does not kill the invocation first: a kill leaves
+ * the event CLAIMED — the claim is released in a `catch`, which a kill never reaches — and
+ * every redelivery afterwards is dropped as a duplicate. Raising the ceiling can only help
+ * the legacy events too, for the same reason.
+ */
+export const maxDuration = 60
 
 type PayPalVerifyWebhookResponse = {
   verification_status?: string

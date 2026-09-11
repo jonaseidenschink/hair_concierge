@@ -113,6 +113,24 @@ export function buildProfileDataFromPersonalPlanCanonicalProfile(
   return profileData
 }
 
+export type LinkQuizToProfileOptions = {
+  /**
+   * `"create_only"` — the FREE-registration binding mode (PR6 review, finding
+   * V4). The confirm route reads bind evidence ("does this account already have
+   * a profile?") and then calls this function; a profile created in that window
+   * — a concurrent paid activation or onboarding — used to be overwritten
+   * unconditionally by the `existing` branch below. In this mode the
+   * `hair_profiles` write may CREATE but never overwrite, and a lost insert race
+   * (the table's `user_id UNIQUE`, so the DB itself adjudicates) is resolved by
+   * standing down rather than by re-reading and updating.
+   *
+   * Omitted everywhere else, so legacy and paid linking behave exactly as before.
+   */
+  profileWrite?: "create_only"
+  /** Injection seam for tests; production always builds its own admin client. */
+  admin?: ReturnType<typeof createAdminClient>
+}
+
 /**
  * After a user authenticates, link their quiz lead data to their profile.
  *
@@ -126,10 +144,12 @@ export async function linkQuizToProfile(
   userId: string,
   email: string | undefined,
   leadId?: string,
+  options?: LinkQuizToProfileOptions,
 ) {
   console.log("[linkQuizToProfile] start", { userId, email, leadId })
 
-  const admin = createAdminClient()
+  const admin = options?.admin ?? createAdminClient()
+  const createOnly = options?.profileWrite === "create_only"
 
   // --- Find the lead ---
   let lead: {
@@ -212,6 +232,14 @@ export async function linkQuizToProfile(
   }
 
   if (existing) {
+    // V4: a free bind never clobbers a profile that exists by the time we write.
+    if (createOnly) {
+      console.warn(
+        "[linkQuizToProfile] create_only: the account already has a profile — standing down",
+        { userId, leadId: lead.id },
+      )
+      return
+    }
     const updates = { ...profileData }
     delete updates.user_id
 
@@ -241,6 +269,17 @@ export async function linkQuizToProfile(
     }
     const { error: insertErr } = await admin.from("hair_profiles").insert(profileData)
     if (insertErr) {
+      // V4: the TOCTOU window itself. `hair_profiles.user_id` is UNIQUE, so a
+      // profile created between the read above and this insert makes the DB
+      // reject it (23505) — which is exactly the answer a free bind must accept.
+      // Nothing is re-read and nothing is updated: the concurrent writer wins.
+      if (createOnly && isUniqueViolation(insertErr)) {
+        console.warn(
+          "[linkQuizToProfile] create_only: lost the profile-creation race — standing down",
+          { userId, leadId: lead.id },
+        )
+        return
+      }
       throw new Error(`hair_profiles insert failed: ${insertErr.message}`)
     }
     console.log("[linkQuizToProfile] created new profile for user", userId)
@@ -308,4 +347,9 @@ async function preparePersonalPlanProfileProjection(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+/** Postgres `unique_violation` as PostgREST reports it. */
+function isUniqueViolation(error: unknown): boolean {
+  return isRecord(error) && error.code === "23505"
 }

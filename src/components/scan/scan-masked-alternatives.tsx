@@ -30,7 +30,7 @@ import { SCAN_STATUS_CLASS } from "./scan-status-tokens"
  */
 
 const SECTION_TITLE = "Passende Alternativen"
-const MASKED_IDENTITY_LABEL = "Produkt verdeckt"
+const MASKED_IDENTITY_LABEL = "Noch verdeckt"
 const CRITERION_COLUMN_LABEL = "Prüfpunkt"
 const STATE_COLUMN_LABEL = "Passt zu dir"
 

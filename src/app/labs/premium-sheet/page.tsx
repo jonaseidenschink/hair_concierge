@@ -25,7 +25,9 @@ export default async function PremiumSheetLabPage({
   const raw = (await searchParams).feature
   const requested = Array.isArray(raw) ? raw[0] : raw
   const initialFeature: PremiumFeatureId =
-    requested && requested in PREMIUM_FEATURES ? (requested as PremiumFeatureId) : "empfehlungen"
+    requested && Object.hasOwn(PREMIUM_FEATURES, requested)
+      ? (requested as PremiumFeatureId)
+      : "empfehlungen"
 
   return (
     <div className="min-h-dvh bg-background">

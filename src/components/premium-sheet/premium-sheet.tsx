@@ -37,6 +37,7 @@ import {
   premiumSheetPurchaseFailureCopy,
 } from "@/lib/premium-sheet/purchase-copy"
 import { premiumSheetPollDelayMs } from "@/lib/premium-sheet/purchase-poll"
+import { premiumSheetCompletionBody } from "@/lib/premium-sheet/purchase-reference"
 import {
   initialPremiumSheetPurchaseState,
   isPremiumSheetPlanSelectionActive,
@@ -60,14 +61,16 @@ import { useToast } from "@/providers/toast-provider"
  *     first (plum, the repo's selected/accent colour) and fills the other two slots from
  *     the core order, so the sheet never reads as a single-feature paywall;
  *  2. the three plans at standard-catalog prices (`@/lib/premium-sheet/pricing` — never
- *     the launch catalog, whatever the launch-pricing flag says), Jährlich preselected;
+ *     the launch catalog, whatever the launch-pricing flag says), Vierteljährlich
+ *     preselected and marked „Beliebteste Wahl" (docket rework R2, ruling A3);
  *  3. one coral CTA, and an escape that is always one tap away. Declining costs nothing:
  *     the free scanner keeps working exactly as before.
  *
  * **T14 — contextual purchase completion.** The CTA no longer dismisses: it swaps the
- * sheet's body for Stripe embedded checkout, in place. The whole purchase happens inside
- * this component, which is why the opener contract still does not change — no navigation,
- * no `/welcome`, no lost scan state.
+ * sheet's body for Stripe embedded checkout plus the offer page's native PayPal button
+ * (docket rework R1), in place. The whole purchase happens inside this component, which is
+ * why the opener contract still does not change — no navigation, no `/welcome`, no lost
+ * scan state, whichever provider the buyer picks.
  *
  * What this component may and may not conclude:
  *  - Stripe's `onComplete` moves it to „prüfen", never to unlocked. Only
@@ -100,11 +103,15 @@ export function PremiumSheet({
    */
   onUnlocked?: () => void
   /**
-   * Asks the opener to open the sheet. Used only by the redirect return (PayPal), where
-   * the buyer comes back on a fresh page load with the sheet closed: a pending or failed
-   * payment must be visible, not silently dispatched into a closed sheet (fix round 1,
-   * F2). Carries the context the purchase started from, so the reopened sheet is the gate
-   * they left, not the surface's default.
+   * Asks the opener to open the sheet. Used by the redirect return and the resume lane,
+   * where the buyer comes back on a fresh page load with the sheet closed: a pending or
+   * failed payment must be visible, not silently dispatched into a closed sheet (fix round
+   * 1, F2). Carries the context the purchase started from, so the reopened sheet is the
+   * gate they left, not the surface's default.
+   *
+   * Not PayPal's path any more (docket rework R1): the sheet's PayPal button approves in a
+   * popup and calls back into the live component, so it never leaves the page. It still
+   * reaches this when the buyer reloads mid-settlement.
    */
   onRequestOpen?: (context: PremiumSheetContext | null) => void
 }) {
@@ -136,6 +143,13 @@ export function PremiumSheet({
   const returnPath = sanitizeFreemiumCheckoutReturnPath(pathname)
   const planSelectionActive = isPremiumSheetPlanSelectionActive(purchase)
   const showsCheckout = premiumSheetShowsCheckout(purchase)
+  /**
+   * Terminal-Abo state (final cleanup batch, Nick-approved): the duplicate guard already
+   * cancelled this attempt and the buyer keeps the subscription they had — retrying only
+   * re-hits the same guard. The CTA becomes a plain dismiss instead of another attempt.
+   */
+  const isSubscriptionAlreadyActiveFailure =
+    purchase.phase === "failed" && purchase.reason === "subscription_already_active"
 
   /**
    * Verification. The only path to an unlocked state — and the only place the server is
@@ -172,7 +186,9 @@ export function PremiumSheet({
         const response = await fetch("/api/freemium/purchase/complete", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sessionId }),
+          // Stripe or PayPal, decided by the reference itself (docket rework R1) — the only
+          // place the two lanes differ on this side of the purchase.
+          body: JSON.stringify(premiumSheetCompletionBody(sessionId)),
         })
         if (response.status === 429) {
           rateLimited = true
@@ -247,10 +263,10 @@ export function PremiumSheet({
   }, [verifyingSessionId, verify])
 
   /**
-   * The contextual return for redirect-based payment methods (PayPal above all). Stripe
-   * navigates back to the ORIGINATING surface — never `/welcome` — carrying the Session id,
-   * and this sheet, which is mounted on every gate, picks it up and finishes exactly the
-   * same verification the in-place completion runs.
+   * The contextual return for redirect-based payment methods (a bank redirect, 3DS on a
+   * separate page). Stripe navigates back to the ORIGINATING surface — never `/welcome` —
+   * carrying the Session id, and this sheet, which is mounted on every gate, picks it up
+   * and finishes exactly the same verification the in-place completion runs.
    */
   const consumedReturnRef = useRef<string | null>(null)
   const returnedContextRef = useRef<PremiumSheetContext | null>(null)
@@ -490,13 +506,17 @@ export function PremiumSheet({
                 className="w-full"
                 data-premium-sheet-cta="true"
                 data-premium-sheet-selected-interval={selectedInterval}
-                onClick={startCheckout}
+                onClick={isSubscriptionAlreadyActiveFailure ? onClose : startCheckout}
               >
                 {/* After a failure the CTA is a retry, not a fresh offer — the repo-wide
-                    „Erneut versuchen" (fix round 1, F2). */}
-                {purchase.phase === "failed"
-                  ? PREMIUM_SHEET_PURCHASE_COPY.retry
-                  : selectedPlan.ctaLabel}
+                    „Erneut versuchen" (fix round 1, F2) — except `subscription_already_active`,
+                    where retrying only re-hits the duplicate guard: the CTA closes the sheet
+                    instead (final cleanup batch). */}
+                {isSubscriptionAlreadyActiveFailure
+                  ? PREMIUM_SHEET_PURCHASE_COPY.close
+                  : purchase.phase === "failed"
+                    ? PREMIUM_SHEET_PURCHASE_COPY.retry
+                    : selectedPlan.ctaLabel}
               </Button>
             ) : null}
             {/* One escape, always present and always one tap away — including mid-payment,
@@ -656,7 +676,11 @@ export function PremiumSheet({
                       <span className="block text-[15px] font-bold text-[var(--brand-plum-darkest)]">
                         {plan.name}
                         {plan.recommended ? (
-                          <span className="ml-2 rounded-full bg-[var(--brand-plum)] px-2 py-0.5 align-middle font-mono text-[8px] font-semibold uppercase tracking-[0.08em] text-white">
+                          /* `whitespace-nowrap` + `inline-block`: „Beliebteste Wahl" is
+                             twice the length of the „empfohlen" it replaced (R2), and an
+                             inline pill that long breaks INSIDE itself into two half-pills.
+                             It now moves to the next line whole, or not at all. */
+                          <span className="ml-2 inline-block whitespace-nowrap rounded-full bg-[var(--brand-plum)] px-2 py-0.5 align-middle font-mono text-[8px] font-semibold uppercase tracking-[0.08em] text-white">
                             {PREMIUM_SHEET_RECOMMENDED_BADGE}
                           </span>
                         ) : null}
@@ -696,5 +720,12 @@ export function PremiumSheet({
 function verificationFailureReason(reason: unknown): PremiumSheetPurchaseFailure {
   if (reason === "checkout_session_expired") return "checkout_expired"
   if (reason === "checkout_session_abandoned") return "checkout_abandoned"
+  // PayPal's equivalent of an expired Session: the checkout intent outlived its 24h TTL
+  // (docket rework R1). Same sentence, because it is the same thing to the buyer.
+  if (reason === "paypal_checkout_intent_expired") return "checkout_expired"
+  // The duplicate guard already cancelled the second subscription and the buyer keeps the
+  // access they had — a generic „nicht bestätigt" would misstate what happened (copy
+  // polish wave): the payment was stopped on purpose, not left unverified.
+  if (reason === "paypal_duplicate_checkout") return "subscription_already_active"
   return "verification_failed"
 }

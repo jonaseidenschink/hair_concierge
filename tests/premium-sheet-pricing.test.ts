@@ -9,6 +9,7 @@ import {
   PREMIUM_SHEET_DEFAULT_INTERVAL,
   PREMIUM_SHEET_PLAN_ORDER,
   PREMIUM_SHEET_PRICING_CATALOG,
+  PREMIUM_SHEET_RECOMMENDED_BADGE,
   PREMIUM_SHEET_RECOMMENDED_INTERVAL,
 } from "@/lib/premium-sheet/pricing"
 import { PERSONAL_PLAN_LAUNCH_PRICING_PLANS } from "@/lib/stripe/pricing-plans"
@@ -108,12 +109,22 @@ for (const launchPricingEnabled of [false, true]) {
   })
 }
 
-test("Jährlich is both the preselected and the recommended row", () => {
-  assert.equal(PREMIUM_SHEET_DEFAULT_INTERVAL, "year")
-  assert.equal(PREMIUM_SHEET_RECOMMENDED_INTERVAL, "year")
+/**
+ * Docket rework R2 (Nick's ruling A3): the favourite moved from Jährlich to
+ * Vierteljährlich, and the marker took the offer page's own wording with it.
+ */
+test("Vierteljährlich is both the preselected and the recommended row", () => {
+  assert.equal(PREMIUM_SHEET_DEFAULT_INTERVAL, "quarter")
+  assert.equal(PREMIUM_SHEET_RECOMMENDED_INTERVAL, "quarter")
+  assert.equal(PREMIUM_SHEET_RECOMMENDED_BADGE, "Beliebteste Wahl")
+  // Row order is unchanged — only the marker and the preselection moved.
+  assert.deepEqual(
+    premiumSheetPlans().map((row) => row.interval),
+    ["year", "quarter", "month"],
+  )
   assert.deepEqual(
     premiumSheetPlans().map((row) => row.recommended),
-    [true, false, false],
+    [false, true, false],
   )
 })
 

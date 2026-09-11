@@ -20,6 +20,9 @@ const PUBLIC_EXACT_ROUTES = [
   "/opengraph-image",
   "/pricing",
   "/quiz",
+  // freemium-scanner-first T18: free registration happens before an account
+  // exists. The page itself 404s while the feature flag is off.
+  "/registrierung",
   "/robots.txt",
   "/sitemap.xml",
   "/twitter-image",
@@ -50,6 +53,9 @@ const PUBLIC_API_EXACT_ROUTES = [
   "/api/analytics/meta-offer-view",
   "/api/analytics/offer-engaged",
   "/api/auth/callback",
+  // freemium-scanner-first T18: turns a quiz lead into a free account, so it
+  // is reached without a session. Own flag gate + lead guards + rate limit.
+  "/api/auth/free-registration",
   "/api/auth/send-magic-link",
   "/api/auth/send-setup-link",
   "/api/auth/set-checkout-password",

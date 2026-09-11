@@ -312,7 +312,11 @@ test("Y3: the memo is dropped exactly on the states that cannot change on their 
 })
 
 test("Y4: an expired or abandoned Session is a failure with its own reason, retryable by CTA", () => {
-  for (const reason of ["checkout_expired", "checkout_abandoned"] as const) {
+  for (const reason of [
+    "checkout_expired",
+    "checkout_abandoned",
+    "subscription_already_active",
+  ] as const) {
     const state = run([
       start,
       ready,

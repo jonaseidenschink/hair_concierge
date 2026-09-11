@@ -144,10 +144,46 @@ import {
 } from "./personal-plan-quiz-first-screen"
 import type { FreshPersonalPlanQuizEntry } from "./progressive-entry-contract"
 import { PERSONAL_PLAN_ASSET_BASE, TEXTURE_QUESTION_CONFIG } from "./texture-question"
+import {
+  FREE_REGISTRATION_HANDOFF_STORAGE_KEY,
+  resolveQuizCompletionDestination,
+} from "@/lib/auth/free-registration"
 
 export { PersonalPlanQuizFieldTestBanner as PersonalPlanFieldTestBanner } from "./personal-plan-quiz-first-screen"
 
 const EMAIL_PROVIDERS = ["gmail.com", "gmx.de", "web.de", "outlook.com", "icloud.com"]
+
+/**
+ * Freemium scanner-first (T18): where a saved lead goes next. Flag ON hands the
+ * lead and its address to `/registrierung`, which sends the magic link
+ * (sessionStorage is unscoped on purpose — the registration screen lives
+ * outside the quiz's draft-scoping). Flag OFF returns today's destination
+ * unchanged; the funnel cutover itself is T19.
+ */
+function resolveQuizCompletionNavigation(
+  leadId: string,
+  email: string,
+  capability: string | null,
+  freemiumScannerFirst: boolean,
+) {
+  if (freemiumScannerFirst) {
+    try {
+      window.sessionStorage.setItem(
+        FREE_REGISTRATION_HANDOFF_STORAGE_KEY,
+        // The capability is what later authorizes an e-mail CORRECTION on
+        // `/registrierung` (T18 fix round 1, W1a). Without it the screen can
+        // still send and resend — it just cannot redirect the lead.
+        JSON.stringify(capability ? { leadId, email, capability } : { leadId, email }),
+      )
+    } catch {
+      /* Without it the registration screen just shows generic copy. */
+    }
+  }
+  return resolveQuizCompletionDestination({
+    leadId,
+    freemiumScannerFirstEnabled: freemiumScannerFirst,
+  })
+}
 
 /**
  * Obergrenze fuer die Vorabpruefung der E-Mail-Adresse. Der Server deckelt den
@@ -1718,7 +1754,7 @@ function EmailCapture({
 }: {
   answers: PersonalPlanQuizAnswers
   onPreparedPlanRejected: () => void
-  onSaved: (leadId: string) => void | Promise<void>
+  onSaved: (leadId: string, email: string, capability: string | null) => void | Promise<void>
   preparedPlan: PreparedPlanClaim
   fieldTest: boolean
 }) {
@@ -1929,6 +1965,11 @@ function EmailCapture({
         payload && typeof payload === "object" && !Array.isArray(payload)
           ? (payload as Record<string, unknown>).fieldTestAttached
           : null
+      const rawCapability =
+        payload && typeof payload === "object" && !Array.isArray(payload)
+          ? (payload as Record<string, unknown>).freeRegistrationCapability
+          : null
+      const capability = typeof rawCapability === "string" ? rawCapability : null
       if (fieldTest && fieldTestAttached !== true) {
         setError(
           "Der Produkttest ist gerade nicht verfügbar. Bitte frage das Chaarlie-Team nach einem neuen Testlink.",
@@ -1941,7 +1982,7 @@ function EmailCapture({
         funnelEventId: funnelEventIdRef.current,
         testKind: fieldTest ? "field_test" : null,
       })
-      await onSaved(leadId)
+      await onSaved(leadId, address, capability)
     } catch {
       setError(
         "Deine Auswertung konnte gerade nicht gespeichert werden. Bitte versuche es noch einmal.",
@@ -2107,10 +2148,12 @@ const DISABLED_PERSONAL_PLAN_RESUME_BOOTSTRAP: PersonalPlanQuizResumeBootstrap =
 export function PersonalPlanQuiz({
   resume = DISABLED_PERSONAL_PLAN_RESUME_BOOTSTRAP,
   fieldTest = false,
+  freemiumScannerFirst = false,
   entry,
 }: {
   resume?: PersonalPlanQuizResumeBootstrap
   fieldTest?: boolean
+  freemiumScannerFirst?: boolean
   entry?: FreshPersonalPlanQuizEntry
 }) {
   const moderator = useModeratorQuiz()
@@ -2707,10 +2750,16 @@ export function PersonalPlanQuiz({
     scheduleNext(next)
   }
 
+  // Field-test and moderator completions keep the paid result reveal even with
+  // the flag on: their journey is the paid product, not the free tier. Declared
+  // above `renderScreen`, which closes over it.
+  const freeRegistrationFunnel = freemiumScannerFirst && !fieldTest && !moderator
+
   function renderScreen() {
     if (screen === "texture") {
       return (
         <PersonalPlanQuizTextureQuestion
+          expectationLine={freemiumScannerFirst}
           onSelect={(texture) => selectSingle(TEXTURE_QUESTION_CONFIG, texture)}
           selected={answers.texture}
         />
@@ -2941,14 +2990,16 @@ export function PersonalPlanQuiz({
             if (sessionStorage) clearPersonalPlanPreparedPlanClaim(sessionStorage)
             setPreparedPlan({ status: "idle", claim: null, error: null })
           }}
-          onSaved={(leadId) => {
+          onSaved={(leadId, email, capability) => {
             stripPersonalPlanQuizResumeTokenFromCurrentUrl()
             void getServerDraftSession().revoke()
             const storage = getBrowserDraftStorage(draftScope)
             if (storage) clearPersonalPlanQuizDraft(storage)
             const sessionStorage = getBrowserSessionStorage(draftScope)
             if (sessionStorage) clearPersonalPlanPreparedPlanClaim(sessionStorage)
-            router.push(`/result/${leadId}/reveal`)
+            router.push(
+              resolveQuizCompletionNavigation(leadId, email, capability, freeRegistrationFunnel),
+            )
           }}
         />
       )

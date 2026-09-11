@@ -118,6 +118,33 @@ export const SEND_AUTH_LINK_RATE_LIMIT: RateLimitConfig = {
   windowMs: 5 * 60_000,
 }
 
+// Free-registration magic link (freemium scanner-first T18): 4 sends per 10
+// minutes per quiz lead — one initial send plus room for a resend and one
+// e-mail correction without the user ever hitting the wall in a normal run.
+export const FREE_REGISTRATION_RATE_LIMIT: RateLimitConfig = {
+  prefix: "free-registration",
+  limit: 4,
+  windowMs: 10 * 60_000,
+}
+
+// T18 fix round 1 (review finding W4): the per-lead bucket bounds nothing on its
+// own — completing the quiz is free and scriptable, so a caller mints as many
+// lead ids (and therefore as many budgets) as it likes. These two dimensions
+// bound the two things that actually cost: outbound mail per caller, and mail
+// per destination inbox. Both are sized well above a real user's worst run
+// (one person, one address, at most a handful of resends).
+export const FREE_REGISTRATION_IP_RATE_LIMIT: RateLimitConfig = {
+  prefix: "free-registration-ip",
+  limit: 20,
+  windowMs: 10 * 60_000,
+}
+
+export const FREE_REGISTRATION_ADDRESS_RATE_LIMIT: RateLimitConfig = {
+  prefix: "free-registration-address",
+  limit: 5,
+  windowMs: 60 * 60_000,
+}
+
 // 8 password attempts per 10 minutes per Stripe checkout session_id.
 export const SET_CHECKOUT_PASSWORD_RATE_LIMIT: RateLimitConfig = {
   prefix: "set-checkout-password",

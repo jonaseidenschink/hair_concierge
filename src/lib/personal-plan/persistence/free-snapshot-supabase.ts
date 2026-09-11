@@ -1,7 +1,13 @@
 import type { SupabaseBillingClient } from "@/lib/billing/types"
 import { resolvePaidAppAccess } from "@/lib/entitlements/access"
+import { createAdminClient } from "@/lib/supabase/admin"
 
-import type { FreeInitialNeedRequest, FreeSnapshotDependencies } from "./free-snapshot-service"
+import {
+  createFreeSnapshotService,
+  type FreeInitialNeedRequest,
+  type FreeSnapshotDependencies,
+  type ProvisionFreeInitialSnapshotResult,
+} from "./free-snapshot-service"
 import type { CreateInitialNeedResult, Stage1PreparedArtifact } from "./stage1-service"
 
 type ArtifactQuery = {
@@ -25,6 +31,22 @@ type AdminClient = {
  * (`stage1-supabase.ts`), passing a `null` enrollment id — the RPC already
  * treats that as a valid, idempotent source key.
  */
+/**
+ * Runtime entry point for the free-registration path (T18): the only caller
+ * allowed to provision free — see the ownership contract in
+ * `free-snapshot-service.ts`. The AUTH e-mail must be threaded through so the
+ * paid-access guard sees email-keyed manual grants (T6 carry-forward).
+ */
+export function provisionFreeInitialSnapshotForUser(input: {
+  userId: string
+  email?: string | null
+}): Promise<ProvisionFreeInitialSnapshotResult> {
+  const admin = createAdminClient() as unknown as AdminClient
+  return createFreeSnapshotService(
+    createFreeSnapshotSupabaseDependencies(admin),
+  ).provisionFreeInitialSnapshot(input)
+}
+
 export function createFreeSnapshotSupabaseDependencies(
   admin: AdminClient,
 ): FreeSnapshotDependencies {

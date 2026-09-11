@@ -47,6 +47,18 @@ today independent of this flag (a valid manual field-test grant plus an
 unrelated moderator-lookup outage) would have been 503'd by the guard where
 `main` returns 200 for them. See the "field-test-guest" rows below.
 
+Note (T4 deferred minor, final triage): `createScanRoute`'s shared order is
+auth → rate limit → parse → handler (see below), and the in-route guard only
+runs inside the handler. With the flag OFF this is moot — middleware denies a
+free user before the request reaches `/api/scan` at all, so rate limiting
+never enters the picture for them. With the flag ON, a free user who is also
+being rate-limited on `/api/scan/save` or `/api/scan/wishlist` sees the shared
+`429 rate_limited` / `503 temporarily_unavailable` from `checkRateLimit`
+before the guard ever runs — not the `403 subscription_required` this table's
+rows describe as "the" response. Intentional (rate limiting is per-user and
+tier-agnostic, same as `resolve`/`search`/`submit`), not a gap, but worth
+naming so the matrix isn't read as "the guard is always the first check."
+
 ## `/api/scan/*`
 
 | Route | Method | Required entitlement | Enforcing seam (flag ON) | Test |

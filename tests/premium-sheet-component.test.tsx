@@ -298,7 +298,7 @@ test("closing holds the last context steady through the exit animation (F1)", ()
 
 // --- plan rows --------------------------------------------------------------
 
-test("plan rows are Jährlich (empfohlen, preselected) · Vierteljährlich · Monatlich", () => {
+test("plan rows are Jährlich · Vierteljährlich (Beliebteste Wahl, preselected) · Monatlich", () => {
   const tree = renderSheet().render()
   const rows = byData(tree, "data-premium-sheet-plan")
 
@@ -309,23 +309,38 @@ test("plan rows are Jährlich (empfohlen, preselected) · Vierteljährlich · Mo
   assert.deepEqual(
     rows.map((row) => textContent(row).replace(/\s+/g, " ")),
     [
-      "Jährlichempfohlen~€8,33 / Monat · 44% sparen99,99 €",
-      "Vierteljährlich~€11,66 / Monat · 22% sparen34,99 €",
+      "Jährlich~€8,33 / Monat · 44% sparen99,99 €",
+      "VierteljährlichBeliebteste Wahl~€11,66 / Monat · 22% sparen34,99 €",
       // Monatlich carries no second line: „/ Monat" would only restate the row's name.
       "Monatlich14,99 €",
     ],
   )
 
-  // Jährlich is preselected, and it is the only row carrying „empfohlen".
+  // Docket rework R2 (ruling A3): Vierteljährlich is preselected and is the only row
+  // carrying the marker — Jährlich no longer recommends itself.
   assert.deepEqual(
     rows.map((row) => row.props["data-premium-sheet-plan-selected"]),
-    ["true", "false", "false"],
+    ["false", "true", "false"],
   )
-  assert.equal(rows[0].props["aria-pressed"], true)
+  assert.equal(rows[1].props["aria-pressed"], true)
+  assert.equal(
+    rows.filter((row) => textContent(row).includes("Beliebteste Wahl")).length,
+    1,
+    "only Vierteljährlich is marked Beliebteste Wahl",
+  )
+  // Driven in /labs/premium-sheet at 375px: the marker is twice the length of the
+  // „empfohlen" it replaced, and as a plain inline pill it broke INSIDE itself into two
+  // half-pills („BELIEBTESTE" / „WAHL"). It moves to the next line whole instead.
+  const badge = findAll(
+    rows[1],
+    (element) => textContent(element).trim() === "Beliebteste Wahl",
+  ).at(-1)!
+  assert.match(badge.props.className as string, /whitespace-nowrap/)
+  assert.match(badge.props.className as string, /inline-block/)
   assert.equal(
     rows.filter((row) => textContent(row).includes("empfohlen")).length,
-    1,
-    "only Jährlich is marked empfohlen",
+    0,
+    "the old empfohlen marker is gone from every row",
   )
 })
 
@@ -334,7 +349,7 @@ test("tapping a plan row moves the selection and the CTA label with it", () => {
   const before = harness.render()
   assert.equal(
     requireOne(before, "data-premium-sheet-cta").props["data-premium-sheet-selected-interval"],
-    "year",
+    "quarter",
   )
 
   const monthly = byData(before, "data-premium-sheet-plan").find(

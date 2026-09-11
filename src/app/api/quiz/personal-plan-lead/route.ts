@@ -35,6 +35,8 @@ import {
 } from "@/lib/personal-plan-field-test"
 
 import { resolveModeratorJourney } from "@/lib/personal-plan-field-test/moderator-journey"
+import { isFreemiumScannerFirstEnabled } from "@/lib/entitlements/flag"
+import { issueFreeRegistrationCapability } from "@/lib/auth/free-registration-capability"
 
 interface PersonalPlanLeadPostDependencies {
   checkRateLimit: typeof checkRateLimit
@@ -51,6 +53,8 @@ interface PersonalPlanLeadPostDependencies {
   resolvePersonalPlanFieldTestCampaignCookie: typeof resolvePersonalPlanFieldTestCampaignCookie
   resolveModeratorJourney: typeof resolveModeratorJourney
   scheduleAfter: typeof after
+  isFreemiumScannerFirstEnabled: typeof isFreemiumScannerFirstEnabled
+  issueFreeRegistrationCapability: (leadId: string) => string | null
 }
 
 export function createPersonalPlanLeadPostHandler(
@@ -71,6 +75,8 @@ export function createPersonalPlanLeadPostHandler(
     resolvePersonalPlanFieldTestCampaignCookie,
     resolveModeratorJourney,
     scheduleAfter: after,
+    isFreemiumScannerFirstEnabled,
+    issueFreeRegistrationCapability: (leadId) => issueFreeRegistrationCapability(leadId),
     ...overrides,
   }
 
@@ -180,10 +186,17 @@ export function createPersonalPlanLeadPostHandler(
         },
       )
       if (saveError) throw saveError
-      const leadId = savedLeads?.[0]?.lead_id
+      const savedLead = savedLeads?.[0]
+      const leadId = savedLead?.lead_id
       if (typeof leadId !== "string") {
         throw new Error("Personal-plan lead save returned no lead ID")
       }
+      // Both save RPCs report whether they RETURNED AN EXISTING lead instead of
+      // inserting one (`reused`). Only an explicit `false` counts as "this
+      // browser created this lead" — anything else (true, missing, malformed)
+      // is treated as reused, which is the fail-closed direction for the
+      // capability minted below.
+      const leadWasReused = savedLead?.reused !== false
 
       const createdAt = new Date().toISOString()
       if (moderator.kind !== "authorized")
@@ -238,11 +251,37 @@ export function createPersonalPlanLeadPostHandler(
                 leadId,
               })
             : false
-      const response = NextResponse.json(
+      // Freemium scanner-first (T18 fix round 1, review finding W1a): quiz
+      // completion is the ONE moment only the completing browser can observe,
+      // so it is where the capability that authorizes a later e-mail CORRECTION
+      // is minted. Returned in the body, carried by the quiz's sessionStorage
+      // handoff to `/registrierung`. Flag-gated: with the flag off the response
+      // body is byte-identical to before, and a missing signing secret simply
+      // omits the field (the correction path then refuses — fail closed).
+      //
+      // PR6 Codex review, finding V1 (CRITICAL): the save RPC DEDUPLICATES.
+      // `save_personal_plan_lead_with_artifact` returns the victim's existing
+      // lead for any submission carrying the same e-mail and the same canonical
+      // answers within 15 minutes (and for a replayed artifact claim), so an
+      // attacker who can guess or observe a victim's answers gets that victim's
+      // lead id back. Minting the capability there handed them authority to
+      // REPOINT the victim's lead at their own address. The capability is
+      // therefore minted ONLY for a genuinely new lead; a reused lead gets none,
+      // and `/registrierung`'s correction path answers with its existing honest
+      // `correction_not_authorized` refusal. Sending and re-sending the link to
+      // the address the lead already holds are unaffected either way.
+      const freeRegistrationCapability =
+        dependencies.isFreemiumScannerFirstEnabled() && !leadWasReused
+          ? dependencies.issueFreeRegistrationCapability(leadId)
+          : null
+      const responseBody: Record<string, unknown> =
         fieldTestCampaign.kind === "eligible"
           ? { leadId, attributionAttached, fieldTestAttached }
-          : { leadId, attributionAttached },
-      )
+          : { leadId, attributionAttached }
+      if (freeRegistrationCapability) {
+        responseBody.freeRegistrationCapability = freeRegistrationCapability
+      }
+      const response = NextResponse.json(responseBody)
       if (isPersonalPlanResultReturnEnabled() && moderator.kind !== "authorized") {
         try {
           const issued = await dependencies.issueResultReturn({

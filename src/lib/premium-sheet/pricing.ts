@@ -16,13 +16,21 @@ import { formatStripePlanDetail, getStripePricingPlan } from "@/lib/stripe/prici
  */
 export const PREMIUM_SHEET_PRICING_CATALOG: SubscriptionPricingCatalog = STANDARD_PRICING_CATALOG
 
-/** Journey step 8: Jährlich (empfohlen) leads, then Vierteljährlich, then Monatlich. */
+/** Journey step 8: Jährlich leads the list, then Vierteljährlich, then Monatlich. */
 export const PREMIUM_SHEET_PLAN_ORDER: readonly BillingInterval[] = ["year", "quarter", "month"]
 
-/** Jährlich is preselected AND carries the „empfohlen" marker. */
-export const PREMIUM_SHEET_DEFAULT_INTERVAL: BillingInterval = "year"
-export const PREMIUM_SHEET_RECOMMENDED_INTERVAL: BillingInterval = "year"
-export const PREMIUM_SHEET_RECOMMENDED_BADGE = "empfohlen"
+/**
+ * **Vierteljährlich is the favourite** (docket rework R2, Nick's ruling A3): it is
+ * preselected AND the only row carrying the marker. Jährlich keeps the top of the list
+ * and its 44%-savings line, but no longer recommends itself.
+ *
+ * The marker's wording is the offer page's own („Beliebteste Wahl",
+ * `src/lib/stripe/pricing-plans.ts`) — the two surfaces now say the same thing about the
+ * same plan, so nothing new is invented here. Prices are untouched (99,99 / 34,99 / 14,99).
+ */
+export const PREMIUM_SHEET_DEFAULT_INTERVAL: BillingInterval = "quarter"
+export const PREMIUM_SHEET_RECOMMENDED_INTERVAL: BillingInterval = "quarter"
+export const PREMIUM_SHEET_RECOMMENDED_BADGE = "Beliebteste Wahl"
 
 /**
  * Row labels per the signed-off journey. „Jährlich"/„Monatlich" match the catalog's own

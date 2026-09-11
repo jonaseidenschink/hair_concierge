@@ -1044,7 +1044,7 @@ test("free tier: an empty reveal says so and leaves the unspent credit's CTA in 
   cardProps(flow.tree).onReveal()
   await flow.settle()
 
-  assert.deepEqual(flow.toasts, ["Gerade keine Alternative verfügbar."])
+  assert.deepEqual(flow.toasts, ["Aktuell keine Alternative gefunden."])
   assert.equal(cardProps(flow.tree).revealedAlternatives, null)
   assert.equal(cardProps(flow.tree).revealUnavailable, false)
   assert.equal(cardProps(flow.tree).result.freeRevealAvailable, true)

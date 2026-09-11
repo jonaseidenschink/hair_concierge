@@ -23,7 +23,7 @@ export function VerfeinerungTeaser({ onUnlock }: { onUnlock: () => void }) {
       </h2>
       <div className="mt-3 rounded-[16px] border border-[var(--brand-plum-light)] bg-[var(--brand-plum-ice)] p-4">
         <p className="text-sm text-[var(--brand-plum-darkest)]">
-          Ein paar kurze Fragen zu deinem Alltag — deine Empfehlungen werden noch genauer.
+          Ein paar Fragen zu deinem Alltag machen deine Empfehlungen noch genauer.
         </p>
         <button
           type="button"

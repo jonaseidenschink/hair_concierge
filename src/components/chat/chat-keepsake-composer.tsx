@@ -28,7 +28,7 @@ export function ChatKeepsakeComposer({ onUnlock }: { onUnlock: () => void }) {
         className="relative flex min-h-[56px] w-full min-w-0 items-center gap-2 rounded-lg border bg-background px-3 py-2 text-left transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         <span className="min-w-0 flex-1 text-base text-muted-foreground md:text-sm">
-          Dein Verlauf bleibt. Zum Weiterschreiben Chat freischalten.
+          Dein Verlauf bleibt. Zum Weiterschreiben freischalten.
         </span>
         <span
           aria-hidden="true"

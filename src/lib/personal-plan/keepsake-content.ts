@@ -56,12 +56,28 @@ export type PersonalPlanKeepsakeReadClient = {
  *
  * Evidence is now composite-denied PLUS any PAID-ERA ARTIFACT — each of these could only
  * ever have been created while the user held paid access:
- * - a `personal_plans` row (enrollment/plan evidence; T14 writes it at VERIFIED purchase
- *   activation, so a never-paid freemium user has none),
+ * - a PAID-ORIGIN `personal_plans` row (enrollment/plan evidence),
  * - their own `scan_wishlist` rows (every write path is premium-gated: the save endpoint,
  *   and T16's auto-save which only runs on a premium resolve),
  * - their own chat conversations (the chat surface is premium; a free user gets the T12
  *   „Beispiel" chat, which writes nothing).
+ *
+ * PAID-ORIGIN IS NOT "HAS A ROW" (PR6 Codex review, finding V5 — cross-PR)
+ * -----------------------------------------------------------------------
+ * The original wording assumed a never-paid freemium user has no `personal_plans` row at
+ * all. T18's free registration falsifies that: `/auth/confirm` provisions the free initial
+ * snapshot, and `personal_plan_create_or_reuse_initial_need` CREATES the plan row on that
+ * first write. A brand-new free registrant therefore classified as LAPSED and was served
+ * keepsake views plus „Noch keine Routine" instead of the approved Beispiel pages and
+ * upgrade CTAs.
+ *
+ * The discriminator is `enrollment_purchase_source_id`, which that same RPC pins on the
+ * FIRST write for a user and never moves on its own: the free path pins it to `null`
+ * (`free-snapshot-service.ts`'s ownership contract) and every paid path carries a real
+ * enrollment id — T14's freemium admission explicitly moves the column off `null` before
+ * calling the RPC (`freemium/plan-provisioning.ts` step 2, the "pin"), and the launch,
+ * migration and field-test paths supply their own source ids. So `IS NOT NULL` is exactly
+ * "this plan was admitted by a purchase", which is what this probe is asking.
  *
  * Each check is an owner-scoped existence probe (one column, `limit(1)`), evaluated in
  * cheapest-first order and short-circuiting on the first hit — a premium user never runs
@@ -77,6 +93,7 @@ type KeepsakeEvidenceTable = "personal_plans" | "scan_wishlist" | "conversations
 type KeepsakeEvidenceQuery = {
   select: (columns: string) => KeepsakeEvidenceQuery
   eq: (column: string, value: unknown) => KeepsakeEvidenceQuery
+  not: (column: string, operator: string, value: unknown) => KeepsakeEvidenceQuery
   limit: (count: number) => KeepsakeEvidenceQuery
   maybeSingle: () => Promise<{ data: unknown; error: unknown }>
 }
@@ -86,23 +103,24 @@ export type PersonalPlanKeepsakeEvidenceReadClient = {
 }
 
 /** The paid-era artifacts, cheapest first. `id` alone — nothing here reads content. */
-const KEEPSAKE_EVIDENCE_TABLES: readonly KeepsakeEvidenceTable[] = [
-  "personal_plans",
-  "scan_wishlist",
-  "conversations",
+const KEEPSAKE_EVIDENCE_PROBES: readonly {
+  table: KeepsakeEvidenceTable
+  /** V5: a `personal_plans` row only counts when a purchase admitted it. */
+  paidOriginOnly?: true
+}[] = [
+  { table: "personal_plans", paidOriginOnly: true },
+  { table: "scan_wishlist" },
+  { table: "conversations" },
 ]
 
 export async function hasPersonalPlanKeepsakeEvidence(
   client: PersonalPlanKeepsakeEvidenceReadClient,
   userId: string,
 ): Promise<boolean> {
-  for (const table of KEEPSAKE_EVIDENCE_TABLES) {
-    const { data, error } = await client
-      .from(table)
-      .select("id")
-      .eq("user_id", userId)
-      .limit(1)
-      .maybeSingle()
+  for (const probe of KEEPSAKE_EVIDENCE_PROBES) {
+    let query = client.from(probe.table).select("id").eq("user_id", userId)
+    if (probe.paidOriginOnly) query = query.not("enrollment_purchase_source_id", "is", null)
+    const { data, error } = await query.limit(1).maybeSingle()
     if (error) throw error
     if (data) return true
   }

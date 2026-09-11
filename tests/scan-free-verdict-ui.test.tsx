@@ -191,7 +191,7 @@ test("free verdict: the masked alternative's comparison rows are fully readable"
   }
   // The fit verdict of the alternative is readable too — only the identity is not.
   assert.ok(text.includes("Passt"))
-  assert.ok(text.includes("Produkt verdeckt"))
+  assert.ok(text.includes("Noch verdeckt"))
   // 2 of the 4 rows are "match".
   assert.ok(text.includes("2 von 4 Prüfpunkten im Ziel"))
 
@@ -275,7 +275,7 @@ test("fix round 1 (F4): an empty revealed list falls back to the empty-alternati
   assert.equal(findByData(tree, "data-scan-masked-alternatives").length, 0)
   const notice = findByData(tree, "data-scan-reveal-empty")
   assert.equal(notice.length, 1)
-  assert.equal(textContent(notice[0]), "Gerade keine Alternative verfügbar.")
+  assert.equal(textContent(notice[0]), "Aktuell keine Alternative gefunden.")
 })
 
 // --- post-reveal locked state ------------------------------------------------

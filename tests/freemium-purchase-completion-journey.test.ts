@@ -7,6 +7,10 @@ import {
   type FreemiumPurchaseCompletionDeps,
 } from "../src/app/api/freemium/purchase/complete/route"
 import type { FreemiumProvisioningResult } from "../src/lib/freemium/plan-provisioning"
+import {
+  PayPalCheckoutActivationError,
+  type PayPalCheckoutAccountResult,
+} from "../src/lib/paypal/checkout-activation"
 import { CheckoutActivationError } from "../src/lib/stripe/checkout-activation"
 import {
   freemiumCheckoutProvisioningUserId,
@@ -28,6 +32,9 @@ import {
 
 const USER = "user-1"
 const SESSION_ID = "cs_test_freemium_1"
+/** Docket rework R1 — the PayPal lane's evidence: an intent token, not a Session id. */
+const PAYPAL_TOKEN = "pp_token_freemium_0123456789"
+const PAYPAL_SUBSCRIPTION_ID = "I-PAYPALSUB1"
 
 function freemiumSession(overrides: Partial<Stripe.Checkout.Session> = {}) {
   return {
@@ -63,6 +70,18 @@ function deps(overrides: Partial<FreemiumPurchaseCompletionDeps> = {}) {
     assertActivatable: () => {},
     activate: async () =>
       ({ userId: USER, email: "buyer@example.com", canSetInitialPassword: false }) as never,
+    findPayPalIntent: async () => ({
+      userId: USER,
+      providerSubscriptionId: PAYPAL_SUBSCRIPTION_ID,
+    }),
+    activatePayPal: async () =>
+      ({
+        status: "active",
+        userId: USER,
+        email: "buyer@example.com",
+        providerSubscriberEmail: "buyer@example.com",
+        canSetInitialPassword: false,
+      }) as never,
     provision: async () => provisioned,
     ...overrides,
   } satisfies FreemiumPurchaseCompletionDeps
@@ -356,6 +375,204 @@ test("a malformed body is rejected before Stripe is touched", async () => {
   )
   assert.equal(result.status, 400)
   assert.equal(retrieved, 0)
+})
+
+/* ------------------------------------------------------------------------- *
+ * PayPal lane (docket rework R1) — the same contract, different evidence.
+ *
+ * The sheet's PayPal button is the offer page's button; the only thing that changed is
+ * where it routes on approval. So what reaches this endpoint is a checkout-intent token,
+ * and these assertions hold it to the SAME bar as the card lane: ownership before any
+ * classification, the server's own re-read decides, and the activation's resolved user
+ * must agree with the caller.
+ * ------------------------------------------------------------------------- */
+
+const paypalBody = { paypalToken: PAYPAL_TOKEN }
+
+test("R1: a verified PayPal approval unlocks, and provisions against the subscription", async () => {
+  const provisions: { userId: string; provider: string; providerReference: string }[] = []
+  const result = await call(
+    {
+      provision: async (input) => {
+        provisions.push(input)
+        return provisioned
+      },
+    },
+    paypalBody,
+  )
+  assert.equal(result.status, 200)
+  assert.deepEqual(result.body, { status: "complete", routineReady: true })
+  assert.deepEqual(provisions, [
+    { userId: USER, provider: "paypal", providerReference: PAYPAL_SUBSCRIPTION_ID },
+  ])
+})
+
+test("R1: an intent this user did not start is refused before PayPal is ever asked", async () => {
+  let activated = 0
+  const result = await call(
+    {
+      findPayPalIntent: async () => ({
+        userId: "someone-else",
+        providerSubscriptionId: PAYPAL_SUBSCRIPTION_ID,
+      }),
+      activatePayPal: async () => {
+        activated += 1
+        throw new Error("must not be reached")
+      },
+    },
+    paypalBody,
+  )
+  assert.equal(result.status, 403)
+  assert.equal(activated, 0, "a foreign token is never an oracle for its settlement state")
+})
+
+test("R1: an unknown token answers exactly like a foreign one", async () => {
+  const result = await call({ findPayPalIntent: async () => null }, paypalBody)
+  assert.equal(result.status, 403)
+})
+
+test("R1: an intent with no bound subscription is pending, not failed", async () => {
+  let activated = 0
+  const result = await call(
+    {
+      findPayPalIntent: async () => ({ userId: USER, providerSubscriptionId: null }),
+      activatePayPal: async () => {
+        activated += 1
+        throw new Error("must not be reached")
+      },
+    },
+    paypalBody,
+  )
+  assert.deepEqual(result.body, { status: "pending" })
+  assert.equal(activated, 0)
+})
+
+test("R1: an approval PayPal has not activated yet is pending — the callback unlocks nothing", async () => {
+  const result = await call({ activatePayPal: async () => ({ status: "pending" }) }, paypalBody)
+  assert.equal(result.status, 200)
+  assert.deepEqual(result.body, { status: "pending" })
+})
+
+test("R1: pending → complete, once PayPal reports the subscription active", async () => {
+  const answers: PayPalCheckoutAccountResult[] = [
+    { status: "pending" },
+    {
+      status: "active",
+      userId: USER,
+      email: "buyer@example.com",
+      providerSubscriberEmail: "buyer@example.com",
+      canSetInitialPassword: false,
+    },
+  ]
+  const activatePayPal = async () => answers.shift()!
+  assert.deepEqual((await call({ activatePayPal }, paypalBody)).body, { status: "pending" })
+  assert.deepEqual((await call({ activatePayPal }, paypalBody)).body, {
+    status: "complete",
+    routineReady: true,
+  })
+})
+
+test("R1: a duplicate-guarded checkout fails recoverably instead of unlocking", async () => {
+  const result = await call({ activatePayPal: async () => ({ status: "duplicate" }) }, paypalBody)
+  assert.deepEqual(result.body, { status: "failed", reason: "paypal_duplicate_checkout" })
+})
+
+test("R1: an activation refusal surfaces its own code, and provisions nothing", async () => {
+  let provisioned = 0
+  const result = await call(
+    {
+      activatePayPal: async () => {
+        throw new PayPalCheckoutActivationError(
+          "paypal_checkout_intent_expired",
+          "PayPal checkout intent is expired",
+        )
+      },
+      provision: async () => {
+        provisioned += 1
+        throw new Error("must not be reached")
+      },
+    },
+    paypalBody,
+  )
+  assert.deepEqual(result.body, { status: "failed", reason: "paypal_checkout_intent_expired" })
+  assert.equal(provisioned, 0)
+})
+
+test("R1: an unreadable activation is 503, never a classified verdict", async () => {
+  const result = await call(
+    {
+      activatePayPal: async () => {
+        throw new Error("paypal api down")
+      },
+    },
+    paypalBody,
+  )
+  assert.equal(result.status, 503)
+  assert.deepEqual(result.body, { error: "temporarily_unavailable" })
+})
+
+test("R1: an activation resolving a different account unlocks nobody", async () => {
+  const result = await call(
+    {
+      activatePayPal: async () =>
+        ({
+          status: "active",
+          userId: "someone-else",
+          email: "other@example.com",
+          providerSubscriberEmail: "other@example.com",
+          canSetInitialPassword: false,
+        }) as never,
+    },
+    paypalBody,
+  )
+  assert.equal(result.status, 403)
+})
+
+test("R1: the PayPal lane shares the card lane's honest provisioning answers", async () => {
+  assert.deepEqual(
+    (await call({ provision: async () => ({ outcome: "no_quiz_artifact" }) }, paypalBody)).body,
+    { status: "provisioning", retryable: false, reason: "no_quiz_artifact" },
+  )
+  assert.deepEqual(
+    (
+      await call(
+        { provision: async () => ({ ...provisioned, routineAccepted: false }) },
+        paypalBody,
+      )
+    ).body,
+    { status: "provisioning", retryable: true, reason: "routine_not_accepted" },
+  )
+})
+
+test("R1: a body naming both providers, or neither, is refused before anything is read", async () => {
+  for (const body of [
+    { sessionId: SESSION_ID, paypalToken: PAYPAL_TOKEN },
+    { paypalToken: "short" },
+    { paypalToken: 42 },
+    {},
+  ]) {
+    let touched = 0
+    const result = await call(
+      {
+        retrieveSession: async () => {
+          touched += 1
+          return freemiumSession()
+        },
+        findPayPalIntent: async () => {
+          touched += 1
+          return { userId: USER, providerSubscriptionId: PAYPAL_SUBSCRIPTION_ID }
+        },
+      },
+      body,
+    )
+    assert.equal(result.status, 400, `must refuse ${JSON.stringify(body)}`)
+    assert.equal(touched, 0)
+  }
+})
+
+test("R1: the PayPal lane is gone with the flag off, and closed to anonymous callers", async () => {
+  assert.equal((await call({ enabled: () => false }, paypalBody)).status, 404)
+  assert.equal((await call({ getUser: async () => null }, paypalBody)).status, 401)
 })
 
 /* ------------------------------------------------------------------------- *

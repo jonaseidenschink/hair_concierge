@@ -17,6 +17,7 @@ import { isPersonalPlanLaunchPricingEnabled } from "@/lib/funnel/flags"
 import {
   parseSubscriptionPricingCatalog,
   resolveSubscriptionPricingCatalog,
+  STANDARD_PRICING_CATALOG,
   type SubscriptionPricingCatalog,
 } from "@/lib/billing/pricing-catalog"
 import { cookies } from "next/headers"
@@ -42,15 +43,48 @@ export const PayPalSubscriptionIntentRequestSchema = z
   .object({
     interval: z.enum(["month", "quarter", "year"]),
     leadId: z.string().uuid().nullable().optional(),
-    source: z.enum(["pricing_page", "quiz_result_offer"]),
+    source: z.enum(["pricing_page", "quiz_result_offer", "premium_sheet"]),
     funnelEventId: z.string().uuid().optional(),
     checkoutAttemptId: z.string().uuid().optional(),
     checkoutContext: z.literal("membership_reactivation").optional(),
     returnDestination: z.string().max(500).optional(),
   })
   .strict()
+  .superRefine(({ source, leadId, checkoutContext, returnDestination }, context) => {
+    // Cleanup batch: mirror Stripe's `create-checkout-session` premium_sheet contract
+    // (`StripeCheckoutSessionRequestSchema`'s `superRefine`). The Premium sheet sells
+    // exactly one thing — a standard-catalog subscription for an already-authenticated
+    // free user — and `leadId` (the lead/funnel offer contract) and `checkoutContext` /
+    // `returnDestination` (membership reactivation's own protocol) belong to OTHER
+    // checkout paths this endpoint speaks. `funnelEventId` and `checkoutAttemptId` stay
+    // allowed: both are legitimately used for premium_sheet, same as on the Stripe route.
+    if (source === "premium_sheet" && (leadId || checkoutContext || returnDestination)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "invalid Premium-sheet checkout contract",
+        path: ["source"],
+      })
+    }
+  })
 
 const ACCESS_CONFLICT_ERROR = "checkout_access_already_exists"
+
+/**
+ * Docket rework R1 — the same pin Stripe's `create-checkout-session` applies for
+ * `source: "premium_sheet"` (`resolveCheckoutPricingCatalog`).
+ *
+ * The Premium sheet renders the STANDARD catalog unconditionally
+ * (`src/lib/premium-sheet/pricing.ts`, T13 §11 F06), so its PayPal plan must be resolved
+ * from the standard catalog too — otherwise a live `PERSONAL_PLAN_LAUNCH_PRICING_ENABLED`
+ * would hand a sheet buyer a 69,99/19,99/9,99 PayPal plan under a 99,99/34,99/14,99 row.
+ * Every other entry point keeps following the flag exactly as before.
+ */
+export function resolvePayPalCheckoutPricingCatalog(
+  source: PayPalCheckoutSource,
+): SubscriptionPricingCatalog {
+  if (source === "premium_sheet") return STANDARD_PRICING_CATALOG
+  return resolveSubscriptionPricingCatalog(isPersonalPlanLaunchPricingEnabled())
+}
 
 export function resolveStoredPayPalCheckoutIntentPlan({
   intentInterval,
@@ -201,7 +235,7 @@ export async function POST(request: Request) {
       }
     }
 
-    const pricingCatalog = resolveSubscriptionPricingCatalog(isPersonalPlanLaunchPricingEnabled())
+    const pricingCatalog = resolvePayPalCheckoutPricingCatalog(source)
     const analyticsPlan = getStripePricingPlan(interval, pricingCatalog)
     let planId: string
     try {

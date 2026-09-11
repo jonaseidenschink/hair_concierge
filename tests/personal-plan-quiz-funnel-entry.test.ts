@@ -36,7 +36,7 @@ test("personal-plan quiz prepares the plan, saves V2 answers, and enters the res
 
   assert.match(
     landing,
-    /<PersonalPlanQuizEntry\s+key=\{moderatorQuiz\?\.scope\}\s+fieldTest=\{personalPlanFieldTest\}\s+resume=\{personalPlanQuizResume\}\s*\/>/,
+    /<PersonalPlanQuizEntry\s+key=\{moderatorQuiz\?\.scope\}\s+fieldTest=\{personalPlanFieldTest\}\s+freemiumScannerFirst=\{freemiumScannerFirst\}\s+resume=\{personalPlanQuizResume\}\s*\/>/,
   )
   assert.match(quiz, /runPersonalPlanPreparationRequest\(/)
   assert.match(preparationClient, /const doFetch = input\.fetch/)
@@ -53,7 +53,17 @@ test("personal-plan quiz prepares the plan, saves V2 answers, and enters the res
   assert.match(quiz, /response\.status === 409/)
   assert.match(quiz, /setPreparedPlan\(\{ status: "idle", claim: null, error: null \}\)/)
   assert.match(quiz, /response\.json\(\)/)
-  assert.match(quiz, /router\.push\(`\/result\/\$\{leadId\}\/reveal`\)/)
+  // freemium-scanner-first T18 moved the destination behind a pure resolver so
+  // the flag-off funnel stays byte-identical; the reveal target itself is
+  // pinned in the resolver.
+  assert.match(
+    quiz,
+    /resolveQuizCompletionNavigation\(leadId, email, capability, freeRegistrationFunnel\)/,
+  )
+  assert.match(
+    read("src/lib/auth/free-registration.ts"),
+    /if \(!input\.freemiumScannerFirstEnabled\) \{\s*return `\/result\/\$\{input\.leadId\}\/reveal`/,
+  )
   assert.doesNotMatch(quiz, /router\.prefetch/)
   assert.match(quiz, /clearPersonalPlanQuizDraft/)
   assert.match(quiz, /Deine Auswertung konnte gerade nicht gespeichert werden/)

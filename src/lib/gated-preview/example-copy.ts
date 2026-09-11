@@ -22,7 +22,7 @@ export const GATED_EXAMPLE_COPY = {
     feature: "routine",
     source: "gated:routine",
     exampleLabel: "Beispiel · eine Chaarlie-Routine",
-    benefit: "Mit Premium: deine eigene Routine, mit deinen Produkten.",
+    benefit: "Mit Premium: deine eigene Routine aus deinen Produkten.",
     cta: "Routine freischalten",
   },
   anwendung: {

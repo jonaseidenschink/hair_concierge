@@ -100,7 +100,10 @@ test("dedicated field-test end surface stays concise and payment-free", () => {
 
 test("field-test lead binding must succeed before the quiz can open a result", () => {
   const attachmentGuard = quizSource.indexOf("fieldTest && fieldTestAttached !== true")
-  const resultNavigation = quizSource.indexOf("await onSaved(leadId)", attachmentGuard)
+  const resultNavigation = quizSource.indexOf(
+    "await onSaved(leadId, address, capability)",
+    attachmentGuard,
+  )
   assert.ok(attachmentGuard > -1)
   assert.ok(resultNavigation > attachmentGuard)
   assert.match(quizSource.slice(attachmentGuard, resultNavigation), /return/)

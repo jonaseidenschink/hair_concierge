@@ -166,11 +166,20 @@ function TextureCheck() {
   )
 }
 
+/**
+ * Freemium scanner-first (T18): the deal is stated once, at the quiz intro —
+ * never as a teaser on the e-mail screen (journey sign-off).
+ */
+export const PERSONAL_PLAN_QUIZ_EXPECTATION_LINE =
+  "Am Ende: dein Haarprofil, und du kannst jedes Produkt scannen — gratis."
+
 export function PersonalPlanQuizTextureQuestion({
+  expectationLine = false,
   onSelect,
   recoveryVisible = false,
   selected,
 }: {
+  expectationLine?: boolean
   onSelect: (texture: PersonalPlanTexture) => void
   recoveryVisible?: boolean
   selected?: PersonalPlanTexture
@@ -183,6 +192,14 @@ export function PersonalPlanQuizTextureQuestion({
       <p className="mx-auto mt-3 max-w-xl text-center text-[15px] leading-6 text-[var(--text-sub)]">
         Wähle das Bild, das deinem natürlichen Haar am nächsten kommt.
       </p>
+      {expectationLine ? (
+        <p
+          className="mx-auto mt-2 max-w-xl text-balance text-center text-[14px] font-semibold leading-6 text-[var(--brand-plum)]"
+          data-personal-plan-expectation-line
+        >
+          {PERSONAL_PLAN_QUIZ_EXPECTATION_LINE}
+        </p>
+      ) : null}
       <div className="mt-5 grid grid-cols-2 auto-rows-fr gap-3 sm:mt-7">
         {TEXTURE_OPTIONS.map((option, optionIndex) => {
           const isSelected = selected === option.value

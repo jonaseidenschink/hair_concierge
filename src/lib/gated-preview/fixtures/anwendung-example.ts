@@ -64,14 +64,14 @@ const WASH_DAY: ApplicationDayView = {
       categoryLabelDe: "Shampoo",
       purposeDe: "Regelmäßige Reinigung",
       actionDe:
-        "Auf die nasse Kopfhaut geben und mit den Fingerkuppen einmassieren. Die Längen werden beim Ausspülen mitgereinigt.",
+        "Auf die nasse Kopfhaut geben, mit den Fingerkuppen einmassieren. Die Längen werden beim Ausspülen mitgereinigt.",
     }),
     productStep({
       product: GATED_EXAMPLE_PRODUCTS.conditioner,
       categoryLabelDe: "Conditioner",
       purposeDe: "Pflege nach der Reinigung",
       actionDe:
-        "In Längen und Spitzen verteilen, die Kopfhaut aussparen. Kurz einwirken lassen, dann gründlich ausspülen.",
+        "In Längen und Spitzen verteilen, Kopfhaut aussparen. Kurz einwirken lassen, gründlich ausspülen.",
     }),
     productStep({
       product: GATED_EXAMPLE_PRODUCTS.leaveIn,
@@ -98,7 +98,7 @@ const INTENSIVE_CARE_DAY: ApplicationDayView = {
   // shampoo cadence says "2× pro Woche", meaning the two Waschtage — Waschtag AND
   // Intensivpflegetag both shampooing would total 3, which the Routine's own cadence line
   // doesn't say. Hair is wetted for the mask without a separate shampoo step instead.
-  summaryDe: "Haare anfeuchten, Maske statt Conditioner verwenden.",
+  summaryDe: "Haare anfeuchten, dann Maske statt Conditioner.",
   cadenceDe: "1× pro Woche",
   steps: [
     productStep({
@@ -106,7 +106,7 @@ const INTENSIVE_CARE_DAY: ApplicationDayView = {
       categoryLabelDe: "Maske",
       purposeDe: "Intensivpflege",
       actionDe:
-        "Haare gründlich anfeuchten, dann die Maske statt des Conditioners in Längen und Spitzen einarbeiten. Nach der angegebenen Zeit gründlich ausspülen.",
+        "Haare anfeuchten, dann die Maske statt des Conditioners in Längen und Spitzen einarbeiten. Nach der angegebenen Zeit gründlich ausspülen.",
     }),
     productStep({
       product: GATED_EXAMPLE_PRODUCTS.leaveIn,
@@ -133,7 +133,7 @@ const STYLING_DAY: ApplicationDayView = {
       categoryLabelDe: "Öl",
       purposeDe: "Finish",
       actionDe:
-        "Ein bis zwei Tropfen in den Handflächen verteilen und nur in die Spitzen geben. Sparsam bleiben, sonst beschwert es.",
+        "Ein bis zwei Tropfen in den Handflächen verteilen, nur in die Spitzen geben. Sparsam bleiben — sonst beschwert es.",
     }),
   ],
   isPartial: false,

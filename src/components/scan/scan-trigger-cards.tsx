@@ -22,18 +22,20 @@ const PROACTIVE_TRIGGER_COPY: Record<
   // evidence that only supports the former. Speaks about the scans, not the routine.
   kategorien_luecke: {
     title: "Lücke in deinen Scans",
-    body: "Leave-in fehlt in deinen Scans.",
+    body: "Ein Leave-in war noch nicht dabei.",
     cta: "Zur Routine",
   },
   passt_gut_moment: {
     title: "Starke Basis",
-    body: "Vervollständige deine Routine.",
+    // Copy polish wave: „Vervollständige deine Routine." presumed a routine the free user
+    // does not have yet — the same objection F7 raised against the old `wiederkehrer` body.
+    body: "Darauf lässt sich eine Routine aufbauen.",
     cta: "Routine ansehen",
   },
   frust_serie: {
     // Fix round 1 (F7): typographic apostrophe, not a straight one.
     title: "Zweimal passt’s nicht",
-    body: "Eine geprüfte Routine erspart dir das Rätselraten.",
+    body: "Eine geprüfte Routine nimmt dir das Raten ab.",
     cta: "Routine ansehen",
   },
   wiederkehrer: {

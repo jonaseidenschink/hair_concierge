@@ -14,7 +14,14 @@ import { hashPersonalPlanNeedVersionInput, type JsonValue } from "./index"
  *   remains the sole writer for the paid/enrolled path and is untouched by this
  *   module. Call this service ONLY at free registration (T18) — it is not safe
  *   to invoke opportunistically for an arbitrary signed-in user (see the
- *   guard below and the no-ordering-guarantee note).
+ *   guard below and the no-ordering-guarantee note). There are exactly TWO
+ *   callers, and the second is a bounded retry of the first: `/auth/confirm`'s
+ *   free-registration branch, and `src/lib/auth/free-registration-recovery.ts`,
+ *   which `/scan` runs only when the flag is on, the page tier already resolved
+ *   to `"free"` (the same email-aware paid-access composite denying), and the
+ *   account has no need version at all. That retry exists because a typed
+ *   provisioning failure at confirm time was otherwise permanent (T18 fix
+ *   round 1, review finding W2).
  * - **No ordering guarantee — a collision is a permanent failure, not a race
  *   that resolves:** the underlying `personal_plan_create_or_reuse_initial_need`
  *   RPC pins a plan's `enrollment_purchase_source_id` on whichever call reaches
