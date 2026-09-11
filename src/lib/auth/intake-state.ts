@@ -37,7 +37,11 @@ export function resolveIntakeState(
 export function getAuthenticatedAppRedirect(
   pathname: string,
   intakeState: IntakeState,
-  options?: { isQuizRetake?: boolean; personalPlanRoutineAccess?: PersonalPlanRoutineAccess },
+  options?: {
+    isQuizRetake?: boolean
+    personalPlanRoutineAccess?: PersonalPlanRoutineAccess
+    freemiumScannerFirstEnabled?: boolean
+  },
 ): string | null {
   if (pathname === "/quiz" && options?.isQuizRetake) {
     return null
@@ -61,6 +65,7 @@ export function getAuthenticatedAppRedirect(
       return canBypassLegacyOnboardingForPersonalPlanRoutine(
         pathname,
         options?.personalPlanRoutineAccess,
+        { freemiumScannerFirstEnabled: options?.freemiumScannerFirstEnabled },
       )
         ? null
         : "/onboarding"
@@ -84,7 +89,15 @@ export function isPersonalPlanOnboardingBypassRoute(pathname: string): boolean {
 export function canBypassLegacyOnboardingForPersonalPlanRoutine(
   pathname: string,
   access: PersonalPlanRoutineAccess | undefined,
+  options?: { freemiumScannerFirstEnabled?: boolean },
 ): boolean {
+  // Freemium scanner-first: /scan's onboarding bypass is decoupled from the
+  // Personal-Plan routine entitlement entirely when the flag is on — it no
+  // longer matters whether the user holds any paid/guest entitlement.
+  if (options?.freemiumScannerFirstEnabled && isRoute(pathname, "/scan")) {
+    return true
+  }
+
   if (!access?.hasActivePersonalPlanEntitlement) return false
 
   const hasPendingOrActiveRoutine = Boolean(

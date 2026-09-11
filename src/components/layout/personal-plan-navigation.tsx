@@ -1,6 +1,6 @@
 "use client"
 
-import { ListChecks, MessageCircle, Rows3, ScanLine, UserRound } from "lucide-react"
+import { ListChecks, Lock, MessageCircle, Rows3, ScanLine, UserRound } from "lucide-react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 
@@ -8,10 +8,45 @@ import {
   RoutineAttentionIndicator,
   useRoutineAttention,
 } from "@/components/routine/personal-plan/routine-attention-indicator"
+import type { EntitlementTier } from "@/lib/entitlements"
 import type { PersonalPlanNavSurface } from "@/lib/personal-plan/lifecycle/repository"
-import type { PersonalPlanNavigationItem } from "@/lib/personal-plan/navigation-access"
+import type {
+  PersonalPlanNavigationItem,
+  PersonalPlanNavigationItemKey,
+} from "@/lib/personal-plan/navigation-access"
 
 const EMPTY_UNVISITED_NAV_SURFACES: ReadonlySet<PersonalPlanNavSurface> = new Set()
+
+/**
+ * Free-tier gated tabs (controller resolution, T3): Chat, Routine, and
+ * Anwendung carry the lock marker for a "free" tier viewer. Scan and Profil
+ * never do — Scan is the freemium entry surface and Profil stays open.
+ * Premium never gets a marker at all (see `NavLockBadge` usage below).
+ */
+const FREE_TIER_LOCKED_ITEM_KEYS = new Set<PersonalPlanNavigationItemKey>([
+  "chat",
+  "routine",
+  "application",
+])
+
+/**
+ * Corner lock marker for a gated tab under the freemium restructure
+ * (controller resolution, T3): the tab icon itself always stays fully
+ * visible — this only ever adds a small badge at its corner, never replaces
+ * or covers it. Purely visual like `NavUnvisitedDot`: tapping the tab still
+ * navigates to the page as today (gating the page content is a later task).
+ */
+function NavLockBadge() {
+  return (
+    <span
+      aria-hidden="true"
+      data-nav-lock-badge="true"
+      className="absolute -right-1 -top-1 flex h-[13px] w-[13px] items-center justify-center rounded-full bg-primary ring-2 ring-background"
+    >
+      <Lock className="h-2 w-2 text-primary-foreground" strokeWidth={3} />
+    </span>
+  )
+}
 
 /**
  * Decorative "never visited this tab" dot (Task 2.9, decision 14) — no
@@ -54,11 +89,14 @@ export function PersonalPlanNavigationView({
   pathname,
   hasPendingRoutineProposal = false,
   unvisitedNavSurfaces = EMPTY_UNVISITED_NAV_SURFACES,
+  tier = "premium",
 }: {
   items: readonly PersonalPlanNavigationItem[]
   pathname: string
   hasPendingRoutineProposal?: boolean
   unvisitedNavSurfaces?: ReadonlySet<PersonalPlanNavSurface>
+  /** Defaults to "premium" (zero lock markers) — matches every caller before T3. */
+  tier?: EntitlementTier
 }) {
   return (
     <>
@@ -127,6 +165,9 @@ export function PersonalPlanNavigationView({
                 ) : unvisitedNavSurfaces.has(item.key) && !active ? (
                   <NavUnvisitedDot />
                 ) : null}
+                {tier === "free" && FREE_TIER_LOCKED_ITEM_KEYS.has(item.key) ? (
+                  <NavLockBadge />
+                ) : null}
               </span>
               <span>{item.label}</span>
             </Link>
@@ -141,10 +182,13 @@ export function PersonalPlanNavigation({
   items,
   initialHasPendingRoutineProposal,
   unvisitedNavSurfaces = EMPTY_UNVISITED_NAV_SURFACES,
+  tier = "premium",
 }: {
   items: readonly PersonalPlanNavigationItem[]
   initialHasPendingRoutineProposal: boolean
   unvisitedNavSurfaces?: ReadonlySet<PersonalPlanNavSurface>
+  /** Defaults to "premium" (zero lock markers) — matches every caller before T3. */
+  tier?: EntitlementTier
 }) {
   const pathname = usePathname() ?? ""
   const hasPendingRoutineProposal = useRoutineAttention(
@@ -157,6 +201,7 @@ export function PersonalPlanNavigation({
       pathname={pathname}
       hasPendingRoutineProposal={hasPendingRoutineProposal}
       unvisitedNavSurfaces={unvisitedNavSurfaces}
+      tier={tier}
     />
   )
 }

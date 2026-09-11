@@ -23,6 +23,7 @@ import {
   pathMatchesRoutePrefix,
   type RouteEnvironment,
 } from "@/lib/auth/route-classification"
+import { isFreemiumScannerFirstEnabled } from "@/lib/entitlements/flag"
 
 const AUTHENTICATED_APP_ROUTE_PREFIXES = ["/anwendung", "/chat", "/routine", "/scan", "/tracker"]
 export const AUTHENTICATED_SESSION_RESPONSE_HEADER = "x-chaarlie-authenticated-session"
@@ -87,6 +88,46 @@ export function isAuthenticatedAppRoutePath(pathname: string) {
 
 export function requiresSubscriptionPath(pathname: string) {
   return SUB_REQUIRED_PREFIXES.some((prefix) => pathMatchesRoutePrefix(pathname, prefix))
+}
+
+// Freemium scanner-first (flag-gated): the app-shell page routes plus
+// /api/scan admit an authenticated user without paid access — page/API
+// shells render instead of bouncing to /reactivate. Every other /api/*
+// prefix (chat, profile, personal-plan, routine, tracker, memory,
+// product-intake) is deliberately excluded and stays subscription-gated;
+// per-feature/premium API enforcement inside these shells is a later task.
+const FREEMIUM_ADMITTED_ROUTE_PREFIXES = [
+  "/anwendung",
+  "/chat",
+  "/routine",
+  "/scan",
+  "/api/scan",
+  "/profile",
+  "/tracker",
+]
+
+export function isFreemiumAdmittedRoutePath(pathname: string) {
+  return FREEMIUM_ADMITTED_ROUTE_PREFIXES.some((prefix) => pathMatchesRoutePrefix(pathname, prefix))
+}
+
+export type ReactivationRedirectContext = {
+  pathname: string
+  freemiumScannerFirstEnabled: boolean
+}
+
+/**
+ * Decides whether a user who has resolved to "no active paid access" at the
+ * outer subscription gate should be sent to /reactivate (pages) or receive
+ * the subscription_required 403 (APIs). Extracted so T17 can extend the
+ * freemium carve-out without re-threading the surrounding paywall control
+ * flow. Behavior today (flag off, or flag on for a non-admitted route) is
+ * unchanged: always redirect/deny.
+ */
+export function shouldRedirectToReactivation(ctx: ReactivationRedirectContext): boolean {
+  if (ctx.freemiumScannerFirstEnabled && isFreemiumAdmittedRoutePath(ctx.pathname)) {
+    return false
+  }
+  return true
 }
 
 export function isAdminRoutePath(pathname: string) {
@@ -244,6 +285,7 @@ export function createUpdateSession(
     })
 
     const { pathname } = request.nextUrl
+    const freemiumScannerFirstEnabled = isFreemiumScannerFirstEnabled()
     const routeEnvironment = dependencies.getRouteEnvironment()
     const routeClassification = classifyRoute(pathname, routeEnvironment)
 
@@ -353,6 +395,13 @@ export function createUpdateSession(
     const partnerGuest = isPartnerAccessGuest(user)
     let oneTimeAccessState: OneTimeAccessState | null = null
     let hasActivePersonalPlanEntitlement = false
+    // Mirrors the paywall's own "has paid access" definition (see the
+    // `!active && oneTimeAccessState !== "active" && moderatorAccess !==
+    // "active"` gate below) — NOT just `hasCurrentAppAccess`. A one-time
+    // purchaser or active moderator counts as paid even while `active` is
+    // `false`, so they must not be treated as free-tier by the freemium
+    // intake exemption below.
+    let hasPaidAppAccessResult = false
     let moderatorAccess: ModeratorAccessState = "none"
 
     if (needsSub) {
@@ -401,6 +450,8 @@ export function createUpdateSession(
           moderatorAccess,
           oneTimeAccessState,
         })
+        hasPaidAppAccessResult =
+          active || oneTimeAccessState === "active" || moderatorAccess === "active"
       } catch (error) {
         console.warn("[billing] app access check failed", error)
         if (fieldTestGuest) {
@@ -467,18 +518,27 @@ export function createUpdateSession(
           url.search = ""
           return redirectWithSupabaseCookies(url, supabaseResponse)
         }
-        if (pathMatchesRoutePrefix(pathname, "/api")) {
-          return NextResponse.json({ error: "subscription_required" }, { status: 403 })
+        if (
+          shouldRedirectToReactivation({
+            pathname,
+            freemiumScannerFirstEnabled,
+          })
+        ) {
+          if (pathMatchesRoutePrefix(pathname, "/api")) {
+            return NextResponse.json({ error: "subscription_required" }, { status: 403 })
+          }
+          const url = request.nextUrl.clone()
+          const next = sanitizeReactivationReturnDestination(
+            `${request.nextUrl.pathname}${request.nextUrl.search}`,
+          )
+          url.pathname = "/reactivate"
+          url.search = ""
+          url.searchParams.set("reason", "expired")
+          url.searchParams.set("next", next)
+          return redirectWithSupabaseCookies(url, supabaseResponse)
         }
-        const url = request.nextUrl.clone()
-        const next = sanitizeReactivationReturnDestination(
-          `${request.nextUrl.pathname}${request.nextUrl.search}`,
-        )
-        url.pathname = "/reactivate"
-        url.search = ""
-        url.searchParams.set("reason", "expired")
-        url.searchParams.set("next", next)
-        return redirectWithSupabaseCookies(url, supabaseResponse)
+        // Freemium admission: flag on + admitted route -> fall through so the
+        // page/API shell renders without an active subscription.
       }
     }
     // --- End subscription paywall ------------------------------------------
@@ -582,10 +642,24 @@ export function createUpdateSession(
           console.warn("[personal-plan] routine access check failed", error)
         }
       }
-      const redirectPath = getAuthenticatedAppRedirect(pathname, intakeState, {
+      const rawRedirectPath = getAuthenticatedAppRedirect(pathname, intakeState, {
         isQuizRetake,
         personalPlanRoutineAccess,
+        freemiumScannerFirstEnabled,
       })
+      // Freemium admission: a free-tier user (no paid access, per the same
+      // composite the subscription paywall uses — hasCurrentAppAccess OR an
+      // active one-time purchase OR an active moderator grant) navigating an
+      // admitted app-shell route is never bounced into legacy onboarding —
+      // they land where they navigated. Paid users (including one-time
+      // owners and active moderators), and any non-admitted route (e.g.
+      // /auth, /quiz), are unaffected.
+      const freemiumIntakeAdmitted =
+        freemiumScannerFirstEnabled &&
+        rawRedirectPath === "/onboarding" &&
+        !hasPaidAppAccessResult &&
+        isFreemiumAdmittedRoutePath(pathname)
+      const redirectPath = freemiumIntakeAdmitted ? null : rawRedirectPath
 
       if (redirectPath) {
         const url = buildAuthenticatedIntakeRedirectUrl(request.nextUrl, pathname, redirectPath)

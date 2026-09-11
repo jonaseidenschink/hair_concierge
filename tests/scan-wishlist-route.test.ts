@@ -16,6 +16,7 @@ function baseDeps(overrides: Partial<ScanWishlistRouteDeps> = {}): ScanWishlistR
     checkRateLimit: async () => ({ allowed: true }),
     createAdminClient: () => ({}) as never,
     listWishlist: async () => [],
+    requirePremiumAccess: async () => "allowed",
     ...overrides,
   }
 }

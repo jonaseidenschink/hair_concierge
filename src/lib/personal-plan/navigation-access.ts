@@ -11,6 +11,9 @@ import {
   recordNavSurfaceVisited,
   shouldShowNavUnvisitedDot,
 } from "@/lib/personal-plan/lifecycle/repository"
+import { hasCurrentAppAccess } from "@/lib/billing/subscriptions"
+import { getEntitlements, type EntitlementTier } from "@/lib/entitlements"
+import { isFreemiumScannerFirstEnabled } from "@/lib/entitlements/flag"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { createClient } from "@/lib/supabase/server"
 import { loadPersonalPlanJourneyAccessForUser } from "./journey-access-loader"
@@ -38,6 +41,19 @@ export type PersonalPlanNavigationItem = {
   label: "Chat" | "Routine" | "Scan" | "Anwendung" | "Profil"
 }
 
+// Product ruling (2026-08-31): the navigation never changes composition —
+// every Personal Plan (and, under the freemium restructure, every free-tier)
+// user always sees the same five tabs. Access enforcement for pre-plan or
+// unpaid users remains the middleware frontier redirect / page-level checks,
+// not this list.
+const PERSONAL_PLAN_NAVIGATION_ITEMS: readonly PersonalPlanNavigationItem[] = [
+  { key: "chat", href: "/chat", label: "Chat" },
+  { key: "routine", href: "/routine", label: "Routine" },
+  { key: "scan", href: "/scan", label: "Scan" },
+  { key: "application", href: "/anwendung", label: "Anwendung" },
+  { key: "profile", href: "/profile", label: "Profil" },
+]
+
 export type AuthenticatedAppNavigationAccess =
   | { kind: "legacy" }
   | {
@@ -59,6 +75,16 @@ export type AuthenticatedAppNavigationAccess =
        * (see `shouldShowNavUnvisitedDot`).
        */
       unvisitedNavSurfaces: ReadonlySet<PersonalPlanNavSurface>
+      /**
+       * T1 entitlements tier (freemium scanner-first restructure). A real
+       * Personal Plan owner (this object built from a paid `personal_plan` /
+       * `personal_plan_start` journey access) is always "premium". A "free"
+       * value only appears for the synthetic five-tab nav built for an
+       * authenticated user with no paid app access when the freemium flag is
+       * on (see `resolveAuthenticatedAppNavigationAccess`) — `PersonalPlanNavigation`
+       * uses it to decide which tabs draw the lock marker.
+       */
+      tier: EntitlementTier
     }
 
 export type AuthenticatedAppNavigationResolverDeps = {
@@ -66,6 +92,16 @@ export type AuthenticatedAppNavigationResolverDeps = {
   loadJourneyAccess: (userId: string) => Promise<PersonalPlanJourneyAccess>
   /** Omit to render with no nav dots at all (safe default; see below). */
   loadNavVisitedState?: (userId: string) => Promise<NavSurfaceVisitedState>
+  /**
+   * T1's `hasAppAccess` signal (same semantics as the existing
+   * `hasCurrentAppAccess` check) — only consulted when the freemium
+   * scanner-first flag is on and `loadJourneyAccess` resolved to `legacy`.
+   * Omit to render exactly today's legacy shell for that population (safe
+   * default: never promotes a user to the free-tier five-tab nav without
+   * this signal, which also keeps a paid pre-restructure "legacy" customer
+   * on their unchanged shell instead of misclassifying them as free tier).
+   */
+  loadHasAppAccess?: (userId: string) => Promise<boolean>
 }
 
 export function toAuthenticatedAppNavigationAccess(
@@ -76,17 +112,7 @@ export function toAuthenticatedAppNavigationAccess(
     return { kind: "legacy" }
   }
 
-  // Product ruling (2026-08-31): the navigation never changes composition —
-  // every Personal Plan user always sees the same five tabs. Access
-  // enforcement for pre-plan users remains the middleware frontier redirect
-  // (frontier-routing.ts), not this list.
-  const items: PersonalPlanNavigationItem[] = [
-    { key: "chat", href: "/chat", label: "Chat" },
-    { key: "routine", href: "/routine", label: "Routine" },
-    { key: "scan", href: "/scan", label: "Scan" },
-    { key: "application", href: "/anwendung", label: "Anwendung" },
-    { key: "profile", href: "/profile", label: "Profil" },
-  ]
+  const items = PERSONAL_PLAN_NAVIGATION_ITEMS
 
   // No `navVisitedState` (caller didn't wire the lifecycle read) degrades the
   // same way an unavailable read does: zero dots, never all of them.
@@ -105,8 +131,35 @@ export function toAuthenticatedAppNavigationAccess(
       access.kind === "personal_plan" ? access.hasPendingRoutineProposal === true : false,
     unvisitedNavSurfaces,
     hasRoutineAccess: access.allowed.stage4,
+    // A `personal_plan` / `personal_plan_start` journey access is only ever
+    // resolved for a user with current paid app access (see
+    // `resolvePersonalPlanJourneyAccess`) — always "premium", independent of
+    // the freemium flag.
+    tier: "premium",
   }
 }
+
+/**
+ * The five-tab nav for an authenticated user with no paid app access, built
+ * without a Personal Plan journey (freemium scanner-first restructure,
+ * flag-gated — see `resolveAuthenticatedAppNavigationAccess`). Same fixed
+ * item list and tab-stable behavior as a real Personal Plan owner; `tier:
+ * "free"` is what tells `PersonalPlanNavigation` to draw lock markers, and
+ * `hasRoutineAccess: false` / an empty `unvisitedNavSurfaces` reflect that
+ * this user has no accepted routine and no visit history to track.
+ */
+function freeTierPersonalPlanNavigationAccess(): AuthenticatedAppNavigationAccess {
+  return {
+    kind: "personal_plan",
+    items: PERSONAL_PLAN_NAVIGATION_ITEMS,
+    hasPendingRoutineProposal: false,
+    hasRoutineAccess: false,
+    unvisitedNavSurfaces: EMPTY_UNVISITED_NAV_SURFACES,
+    tier: "free",
+  }
+}
+
+const EMPTY_UNVISITED_NAV_SURFACES: ReadonlySet<PersonalPlanNavSurface> = new Set()
 
 /**
  * Whether `/routine` is a real destination for this user rather than the
@@ -131,6 +184,19 @@ export async function resolveAuthenticatedAppNavigationAccess(
     if (!userId) return { kind: "legacy" }
     const access = await deps.loadJourneyAccess(userId)
     if (access.kind !== "personal_plan" && access.kind !== "personal_plan_start") {
+      // Freemium scanner-first restructure (flag-gated): an authenticated
+      // user with no Personal Plan journey access still gets the five-tab
+      // shell — as "free" tier, with lock markers — as long as they also
+      // have no paid app access at all. `access.kind === "legacy"` alone
+      // isn't enough to tell that apart from a pre-restructure paying
+      // customer outside the new-buyer cohort ("premium legacy state", which
+      // must keep today's legacy shell unchanged) — `loadHasAppAccess` (T1's
+      // `hasAppAccess` signal) is what makes the distinction. `paid_pending`
+      // is left untouched: its own recovery UI already handles that state.
+      if (access.kind === "legacy" && deps.loadHasAppAccess && isFreemiumScannerFirstEnabled()) {
+        const entitlements = await getEntitlements(userId, { hasAppAccess: deps.loadHasAppAccess })
+        if (entitlements.tier === "free") return freeTierPersonalPlanNavigationAccess()
+      }
       return { kind: "legacy" }
     }
     // Only fetched for a Personal Plan destination: skip the extra read for
@@ -155,6 +221,19 @@ export const loadCachedAuthenticatedAppUserId = cache(
 const loadCachedNavVisitedStateForUser = cache(
   async (userId: string): Promise<NavSurfaceVisitedState> =>
     loadVisitedNavSurfaces(createAdminClient() as unknown as PersonalPlanLifecycleClient, userId),
+)
+
+/**
+ * T1's `hasAppAccess` signal, sourced from the same paid-access check used
+ * everywhere else in the app (`hasCurrentAppAccess`). Deliberately looked up
+ * by user id only (no email lookup here, unlike most other call sites) —
+ * this only ever gates a cosmetic nav lock marker for an already-"legacy"
+ * journey user, never real access; a manual/moderator grant keyed solely by
+ * email is the one case this can miss.
+ */
+const loadCachedHasAppAccessForUser = cache(
+  (userId: string): Promise<boolean> =>
+    hasCurrentAppAccess(createAdminClient(), { userId, email: null }),
 )
 
 export type SchedulePersonalPlanNavSurfaceVisitDeps = {
@@ -211,5 +290,6 @@ export const loadAuthenticatedAppNavigationAccess = cache(
       getUserId: loadCachedAuthenticatedAppUserId,
       loadJourneyAccess: loadCachedPersonalPlanJourneyAccessForUser,
       loadNavVisitedState: loadCachedNavVisitedStateForUser,
+      loadHasAppAccess: loadCachedHasAppAccessForUser,
     }),
 )

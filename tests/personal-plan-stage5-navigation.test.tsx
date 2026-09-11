@@ -14,6 +14,8 @@ import {
   resolveAuthenticatedAppNavigationAccess,
   schedulePersonalPlanNavSurfaceVisit,
   toAuthenticatedAppNavigationAccess,
+  type AuthenticatedAppNavigationAccess,
+  type PersonalPlanNavigationItem,
   type SchedulePersonalPlanNavSurfaceVisitDeps,
 } from "../src/lib/personal-plan/navigation-access"
 import type { PersonalPlanJourneyAccess } from "../src/lib/personal-plan/journey-access"
@@ -50,6 +52,7 @@ test("Personal Plan navigation always exposes the same five tabs in the signed o
       items: fixedItems,
       unvisitedNavSurfaces: new Set(),
       hasRoutineAccess: stage4,
+      tier: "premium",
     })
   }
 })
@@ -490,4 +493,183 @@ test("no user id resolves to a no-op: nothing is scheduled", async () => {
   })
 
   assert.equal(scheduled, 0)
+})
+
+// --- T3: freemium shell + nav for free users (flag-gated) -------------------
+
+function withFreemiumScannerFirstFlag(enabled: boolean, run: () => Promise<void> | void) {
+  const original = process.env.FREEMIUM_SCANNER_FIRST_ENABLED
+  if (enabled) process.env.FREEMIUM_SCANNER_FIRST_ENABLED = "true"
+  else delete process.env.FREEMIUM_SCANNER_FIRST_ENABLED
+  return Promise.resolve(run()).finally(() => {
+    if (original === undefined) delete process.env.FREEMIUM_SCANNER_FIRST_ENABLED
+    else process.env.FREEMIUM_SCANNER_FIRST_ENABLED = original
+  })
+}
+
+const freeTierFixedItems = [
+  { key: "chat", href: "/chat", label: "Chat" },
+  { key: "routine", href: "/routine", label: "Routine" },
+  { key: "scan", href: "/scan", label: "Scan" },
+  { key: "application", href: "/anwendung", label: "Anwendung" },
+  { key: "profile", href: "/profile", label: "Profil" },
+]
+
+test("flag off: a legacy-kind authenticated user with no paid access stays on the legacy shell, and the paid-access signal is never even consulted (byte-identical)", async () => {
+  await withFreemiumScannerFirstFlag(false, async () => {
+    let loadHasAppAccessCalls = 0
+    const navigation = await resolveAuthenticatedAppNavigationAccess({
+      getUserId: async () => "user-1",
+      loadJourneyAccess: async () => ({ kind: "legacy" }),
+      loadHasAppAccess: async () => {
+        loadHasAppAccessCalls += 1
+        return false
+      },
+    })
+    assert.deepEqual(navigation, { kind: "legacy" })
+    assert.equal(loadHasAppAccessCalls, 0)
+  })
+})
+
+test("flag on but no loadHasAppAccess dep wired: never promotes to free tier (safe default)", async () => {
+  await withFreemiumScannerFirstFlag(true, async () => {
+    const navigation = await resolveAuthenticatedAppNavigationAccess({
+      getUserId: async () => "user-1",
+      loadJourneyAccess: async () => ({ kind: "legacy" }),
+    })
+    assert.deepEqual(navigation, { kind: "legacy" })
+  })
+})
+
+test("flag on, legacy journey kind, no paid app access: promotes to the free-tier five-tab nav", async () => {
+  await withFreemiumScannerFirstFlag(true, async () => {
+    let loadHasAppAccessUserId: string | null = null
+    const navigation = await resolveAuthenticatedAppNavigationAccess({
+      getUserId: async () => "user-1",
+      loadJourneyAccess: async () => ({ kind: "legacy" }),
+      loadHasAppAccess: async (userId) => {
+        loadHasAppAccessUserId = userId
+        return false
+      },
+    })
+    assert.equal(loadHasAppAccessUserId, "user-1")
+    assert.deepEqual(navigation, {
+      kind: "personal_plan",
+      items: freeTierFixedItems,
+      hasPendingRoutineProposal: false,
+      hasRoutineAccess: false,
+      unvisitedNavSurfaces: new Set(),
+      tier: "free",
+    })
+  })
+})
+
+test("flag on, legacy journey kind, but WITH paid app access (a premium legacy state): keeps exactly today's legacy shell", async () => {
+  await withFreemiumScannerFirstFlag(true, async () => {
+    const navigation = await resolveAuthenticatedAppNavigationAccess({
+      getUserId: async () => "user-1",
+      loadJourneyAccess: async () => ({ kind: "legacy" }),
+      loadHasAppAccess: async () => true,
+    })
+    assert.deepEqual(navigation, { kind: "legacy" })
+  })
+})
+
+test("flag on, paid_pending journey kind: left untouched, never promoted to free tier", async () => {
+  await withFreemiumScannerFirstFlag(true, async () => {
+    let loadHasAppAccessCalls = 0
+    const navigation = await resolveAuthenticatedAppNavigationAccess({
+      getUserId: async () => "user-1",
+      loadJourneyAccess: async () => ({ kind: "paid_pending", recoveryHref: "/plan-bereit" }),
+      loadHasAppAccess: async () => {
+        loadHasAppAccessCalls += 1
+        return false
+      },
+    })
+    assert.deepEqual(navigation, { kind: "legacy" })
+    assert.equal(loadHasAppAccessCalls, 0)
+  })
+})
+
+test("flag on, a real Personal Plan journey: tier is always premium and the paid-access signal is never consulted", async () => {
+  await withFreemiumScannerFirstFlag(true, async () => {
+    const navigation = await resolveAuthenticatedAppNavigationAccess({
+      getUserId: async () => "user-1",
+      loadJourneyAccess: async () => personalPlanAccess(true, false),
+      loadHasAppAccess: async () => {
+        throw new Error("must not be called for an already-paid Personal Plan journey")
+      },
+    })
+    assert.equal(navigation.kind, "personal_plan")
+    if (navigation.kind !== "personal_plan") return
+    assert.equal(navigation.tier, "premium")
+  })
+})
+
+test("premium tier renders zero lock markers", () => {
+  const html = renderToStaticMarkup(
+    createElement(PersonalPlanNavigationView, {
+      items: freeTierFixedItems as PersonalPlanNavigationItem[],
+      pathname: "/scan",
+      tier: "premium",
+    }),
+  )
+  assert.doesNotMatch(html, /data-nav-lock-badge/)
+})
+
+test("free tier renders the lock marker on exactly chat, routine, and anwendung — never scan or profile, and never on the desktop nav (no icons there)", () => {
+  const html = renderToStaticMarkup(
+    createElement(PersonalPlanNavigationView, {
+      items: freeTierFixedItems as PersonalPlanNavigationItem[],
+      pathname: "/scan",
+      tier: "free",
+    }),
+  )
+
+  const headerNav = html.match(
+    /<nav aria-label="Personal-Plan-Navigation"[^>]*>[\s\S]*?<\/nav>/,
+  )?.[0]
+  const mobileNav = html.match(
+    /<nav aria-label="Personal-Plan-Navigation \(mobil\)"[^>]*>[\s\S]*?<\/nav>/,
+  )?.[0]
+  assert.ok(headerNav && mobileNav, "expected both the header and mobile nav markup")
+  assert.doesNotMatch(headerNav!, /data-nav-lock-badge/)
+
+  const linkFor = (nav: string, href: string) =>
+    nav.match(new RegExp(`<a[^>]*href="${href}"[^>]*>[\\s\\S]*?</a>`))?.[0]
+
+  for (const href of ["/chat", "/routine", "/anwendung"]) {
+    const link = linkFor(mobileNav!, href)
+    assert.ok(link, `expected a nav link for ${href}`)
+    assert.match(link!, /data-nav-lock-badge="true"/)
+    // The lock marker never replaces or covers the tab icon (controller
+    // resolution): the icon glyph must still render alongside the badge.
+    assert.match(link!, /<svg[^>]*class="[^"]*\bh-5 w-5\b[^"]*"/)
+  }
+  for (const href of ["/scan", "/profile"]) {
+    const link = linkFor(mobileNav!, href)
+    assert.ok(link, `expected a nav link for ${href}`)
+    assert.doesNotMatch(link!, /data-nav-lock-badge/)
+  }
+})
+
+test("the shell picks the five-tab nav (with locks) for a free-tier navigation object, exactly like a real Personal Plan owner", () => {
+  const freeTierNavigation: AuthenticatedAppNavigationAccess = {
+    kind: "personal_plan",
+    items: freeTierFixedItems as PersonalPlanNavigationItem[],
+    hasPendingRoutineProposal: false,
+    hasRoutineAccess: false,
+    unvisitedNavSurfaces: new Set(),
+    tier: "free",
+  }
+  const html = renderToStaticMarkup(
+    createElement(AuthenticatedAppShell, {
+      navigation: freeTierNavigation,
+      legacyHeader: createElement("header", { "data-legacy-header": true }, "Legacy"),
+      children: createElement("main", null, "Inhalt"),
+    }),
+  )
+  assert.doesNotMatch(html, /data-legacy-header/)
+  assert.match(html, /aria-label="Personal-Plan-Navigation \(mobil\)"/)
+  assert.equal((html.match(/data-nav-lock-badge="true"/g) ?? []).length, 3)
 })

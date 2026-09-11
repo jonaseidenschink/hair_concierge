@@ -36,6 +36,7 @@ function createMiddleware({
   useDefaultFrontier = false,
   userAppMetadata = { access_kind: "field_test" },
   moderatorAccess = "none",
+  oneTimeAccessState = "none",
   hairProfile = completeQuizProfile as Record<string, unknown> | null,
   observedTables,
   frontierCalls,
@@ -60,6 +61,7 @@ function createMiddleware({
   useDefaultFrontier?: boolean
   userAppMetadata?: Record<string, unknown>
   moderatorAccess?: "active" | "ended" | "none" | "unavailable"
+  oneTimeAccessState?: "none" | "paid_pending" | "active" | "revoked"
   hairProfile?: Record<string, unknown> | null
   observedTables?: string[]
   frontierCalls?: { count: number }
@@ -144,7 +146,7 @@ function createMiddleware({
     hasCurrentPaidAppAccess: (async () =>
       paidAccess) as UpdateSessionDependencies["hasCurrentPaidAppAccess"],
     resolveOneTimeAccessState: (async () =>
-      "none") as UpdateSessionDependencies["resolveOneTimeAccessState"],
+      oneTimeAccessState) as UpdateSessionDependencies["resolveOneTimeAccessState"],
     resolveModeratorAccess: (async () =>
       moderatorAccess) as UpdateSessionDependencies["resolveModeratorAccess"],
     getRouteEnvironment: () => ({ nodeEnv: "test", localDevLoginEnabled: false }),
@@ -278,6 +280,149 @@ test("tracker still redirects an authenticated user without current access to re
   assert.ok(!observedTables.includes("profiles"))
   assert.ok(!observedTables.includes("hair_profiles"))
   assert.equal(frontierCalls.count, 0)
+})
+
+// --- Freemium scanner-first flag (T2), end-to-end through createUpdateSession ---
+
+test("flag off: FREEMIUM_SCANNER_FIRST_ENABLED unset still redirects tracker to reactivate (byte-identical)", async () => {
+  const original = process.env.FREEMIUM_SCANNER_FIRST_ENABLED
+  delete process.env.FREEMIUM_SCANNER_FIRST_ENABLED
+  try {
+    const response = await createMiddleware({
+      currentAccess: false,
+      userAppMetadata: {},
+    })(new NextRequest("https://chaarlie.de/tracker"))
+
+    assert.equal(response.status, 307)
+    assert.equal(
+      response.headers.get("location"),
+      "https://chaarlie.de/reactivate?reason=expired&next=%2Ftracker",
+    )
+  } finally {
+    if (original === undefined) delete process.env.FREEMIUM_SCANNER_FIRST_ENABLED
+    else process.env.FREEMIUM_SCANNER_FIRST_ENABLED = original
+  }
+})
+
+test("flag on: a free authenticated user (no current access) reaches /tracker instead of being sent to reactivate", async () => {
+  const original = process.env.FREEMIUM_SCANNER_FIRST_ENABLED
+  process.env.FREEMIUM_SCANNER_FIRST_ENABLED = "true"
+  try {
+    const response = await createMiddleware({
+      currentAccess: false,
+      userAppMetadata: {},
+    })(new NextRequest("https://chaarlie.de/tracker"))
+
+    assert.equal(response.status, 200)
+    assert.equal(response.headers.get("location"), null)
+  } finally {
+    if (original === undefined) delete process.env.FREEMIUM_SCANNER_FIRST_ENABLED
+    else process.env.FREEMIUM_SCANNER_FIRST_ENABLED = original
+  }
+})
+
+test("flag on: a free authenticated user without current access is still gated on a non-admitted route (/api/chat stays subscription_required)", async () => {
+  const original = process.env.FREEMIUM_SCANNER_FIRST_ENABLED
+  process.env.FREEMIUM_SCANNER_FIRST_ENABLED = "true"
+  try {
+    const response = await createMiddleware({
+      currentAccess: false,
+      userAppMetadata: {},
+    })(new NextRequest("https://chaarlie.de/api/chat"))
+
+    assert.equal(response.status, 403)
+    const body = await response.json()
+    assert.deepEqual(body, { error: "subscription_required" })
+  } finally {
+    if (original === undefined) delete process.env.FREEMIUM_SCANNER_FIRST_ENABLED
+    else process.env.FREEMIUM_SCANNER_FIRST_ENABLED = original
+  }
+})
+
+test("flag on: a free authenticated user reaches the /scan page shell without being bounced to onboarding", async () => {
+  const original = process.env.FREEMIUM_SCANNER_FIRST_ENABLED
+  process.env.FREEMIUM_SCANNER_FIRST_ENABLED = "true"
+  try {
+    const observedTables: string[] = []
+    const response = await createMiddleware({
+      currentAccess: false,
+      userAppMetadata: {},
+      observedTables,
+    })(new NextRequest("https://chaarlie.de/scan"))
+
+    assert.equal(response.status, 200)
+    assert.equal(response.headers.get("location"), null)
+    // No personal_plans routine lookup is needed to admit this free user —
+    // the /scan bypass is now entitlement-independent under the flag.
+    assert.ok(!observedTables.includes("personal_plans"))
+  } finally {
+    if (original === undefined) delete process.env.FREEMIUM_SCANNER_FIRST_ENABLED
+    else process.env.FREEMIUM_SCANNER_FIRST_ENABLED = original
+  }
+})
+
+test("flag on: needs_onboarding + no paid access reaches /anwendung without being bounced to onboarding", async () => {
+  const original = process.env.FREEMIUM_SCANNER_FIRST_ENABLED
+  process.env.FREEMIUM_SCANNER_FIRST_ENABLED = "true"
+  try {
+    // Default hairProfile (complete) + default profile.onboarding_completed
+    // false resolves to intakeState "needs_onboarding". No paid access at
+    // all: no current app access, no one-time purchase, no moderator grant.
+    const response = await createMiddleware({
+      currentAccess: false,
+      userAppMetadata: {},
+      oneTimeAccessState: "none",
+      moderatorAccess: "none",
+    })(new NextRequest("https://chaarlie.de/anwendung"))
+
+    assert.equal(response.status, 200)
+    assert.equal(response.headers.get("location"), null)
+  } finally {
+    if (original === undefined) delete process.env.FREEMIUM_SCANNER_FIRST_ENABLED
+    else process.env.FREEMIUM_SCANNER_FIRST_ENABLED = original
+  }
+})
+
+test("flag on: a one-time-access owner (active, but hasCurrentAppAccess false) at needs_onboarding is still redirected to /onboarding from /anwendung (I1 regression)", async () => {
+  const original = process.env.FREEMIUM_SCANNER_FIRST_ENABLED
+  process.env.FREEMIUM_SCANNER_FIRST_ENABLED = "true"
+  try {
+    // This mirrors the flag-OFF outcome exactly: a paying one-time-access
+    // owner who hasn't finished legacy onboarding must not be admitted by
+    // the freemium exemption just because the underlying `active` (current
+    // app access) boolean happens to be false.
+    const response = await createMiddleware({
+      currentAccess: false,
+      userAppMetadata: {},
+      oneTimeAccessState: "active",
+      moderatorAccess: "none",
+    })(new NextRequest("https://chaarlie.de/anwendung"))
+
+    assert.equal(response.status, 307)
+    assert.equal(response.headers.get("location"), "https://chaarlie.de/onboarding")
+  } finally {
+    if (original === undefined) delete process.env.FREEMIUM_SCANNER_FIRST_ENABLED
+    else process.env.FREEMIUM_SCANNER_FIRST_ENABLED = original
+  }
+})
+
+test("flag off: a one-time-access owner at needs_onboarding is redirected to /onboarding from /anwendung (baseline)", async () => {
+  const original = process.env.FREEMIUM_SCANNER_FIRST_ENABLED
+  delete process.env.FREEMIUM_SCANNER_FIRST_ENABLED
+  try {
+    const response = await createMiddleware({
+      currentAccess: false,
+      userAppMetadata: {},
+      oneTimeAccessState: "active",
+      moderatorAccess: "none",
+    })(new NextRequest("https://chaarlie.de/anwendung"))
+
+    assert.equal(response.status, 307)
+    assert.equal(response.headers.get("location"), "https://chaarlie.de/onboarding")
+  } finally {
+    if (original === undefined) delete process.env.FREEMIUM_SCANNER_FIRST_ENABLED
+    else process.env.FREEMIUM_SCANNER_FIRST_ENABLED = original
+  }
 })
 
 test("chat retains proxy intake and preserves redirect query parameters", async () => {

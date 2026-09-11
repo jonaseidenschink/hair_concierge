@@ -296,3 +296,85 @@ test("scan bypasses legacy onboarding for any personal-plan entitlement holder, 
     "/quiz",
   )
 })
+
+// --- Freemium scanner-first flag (T2) --------------------------------------
+
+test("flag off: canBypassLegacyOnboardingForPersonalPlanRoutine for /scan is unchanged (still requires entitlement)", () => {
+  assert.equal(canBypassLegacyOnboardingForPersonalPlanRoutine("/scan", undefined), false)
+  assert.equal(
+    canBypassLegacyOnboardingForPersonalPlanRoutine("/scan", undefined, {
+      freemiumScannerFirstEnabled: false,
+    }),
+    false,
+  )
+})
+
+test("flag on: /scan bypasses legacy onboarding with no entitlement at all", () => {
+  assert.equal(
+    canBypassLegacyOnboardingForPersonalPlanRoutine("/scan", undefined, {
+      freemiumScannerFirstEnabled: true,
+    }),
+    true,
+  )
+  assert.equal(
+    canBypassLegacyOnboardingForPersonalPlanRoutine(
+      "/scan",
+      {
+        hasActivePersonalPlanEntitlement: false,
+        pendingRoutineProposalId: null,
+        activeRoutineVersionId: null,
+      },
+      { freemiumScannerFirstEnabled: true },
+    ),
+    true,
+  )
+})
+
+test("flag on: /scan decoupling does not leak to routine, anwendung or chat", () => {
+  assert.equal(
+    canBypassLegacyOnboardingForPersonalPlanRoutine("/routine", undefined, {
+      freemiumScannerFirstEnabled: true,
+    }),
+    false,
+  )
+  assert.equal(
+    canBypassLegacyOnboardingForPersonalPlanRoutine("/anwendung", undefined, {
+      freemiumScannerFirstEnabled: true,
+    }),
+    false,
+  )
+  assert.equal(
+    canBypassLegacyOnboardingForPersonalPlanRoutine("/chat", undefined, {
+      freemiumScannerFirstEnabled: true,
+    }),
+    false,
+  )
+})
+
+test("flag on: getAuthenticatedAppRedirect lets a quiz-complete, entitlement-less user reach /scan", () => {
+  assert.equal(
+    getAuthenticatedAppRedirect("/scan", "needs_onboarding", {
+      freemiumScannerFirstEnabled: true,
+    }),
+    null,
+  )
+})
+
+test("flag off: getAuthenticatedAppRedirect still bounces the same user to /onboarding", () => {
+  assert.equal(getAuthenticatedAppRedirect("/scan", "needs_onboarding"), "/onboarding")
+  assert.equal(
+    getAuthenticatedAppRedirect("/scan", "needs_onboarding", {
+      freemiumScannerFirstEnabled: false,
+    }),
+    "/onboarding",
+  )
+})
+
+test("flag on: quiz-incomplete users are still sent to /quiz before /scan, unaffected by the flag", () => {
+  assert.equal(
+    getAuthenticatedAppRedirect("/scan", "needs_quiz", {
+      freemiumScannerFirstEnabled: true,
+    }),
+    "/quiz",
+  )
+})
