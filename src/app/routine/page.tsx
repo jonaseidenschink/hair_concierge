@@ -1,10 +1,12 @@
 import Link from "next/link"
 import type { ReactNode } from "react"
 
+import { GatedRoutineExample } from "@/components/gated-preview/gated-routine-example"
 import { PersonalPlanRoutineClient } from "@/components/routine/personal-plan"
 import type { RoutineRefinementBannerViewModel } from "@/components/routine/personal-plan/routine-refinement-banner"
 import { RoutinePageClient } from "@/components/routine/routine-page-client"
 import { RetryRefreshButton } from "@/components/ui/retry-refresh-button"
+import { shouldRenderGatedExample } from "@/lib/gated-preview/gate"
 import { loadPersonalPlanRoutineView } from "@/lib/personal-plan/routine/load-view"
 import type { PersonalPlanRoutineReadClient } from "@/lib/personal-plan/routine/repository"
 import {
@@ -176,7 +178,30 @@ async function resolveDefaultRoutinePage() {
 }
 
 export default async function RoutinePage() {
-  const resolved = await resolveDefaultRoutinePage()
+  // T12 (freemium-scanner-first PR3): the free tier gets the framed „Beispiel" Routine
+  // instead of its own (empty, stage-gated) one — the only branch this page gained;
+  // premium and flag-off fall straight through to today's behaviour below.
+  //
+  // Pre-boundary fix wave (F2): the tier check and `resolveDefaultRoutinePage` now start
+  // CONCURRENTLY instead of the tier gating serially ahead of the resolver — the previous
+  // order added one `auth.getUser()` plus a billing/moderator composite in front of every
+  // PREMIUM render, which is the common case. The trade is a resolver read a FREE render
+  // now performs and discards (never a write — `resolveRoutinePage` is read-only and
+  // catches its own errors) for zero added latency on the premium path. Semantics are
+  // unchanged: a free render still never reaches `resolved`'s output, and
+  // `shouldRenderGatedExample` itself still fails closed to premium on flag-off or an
+  // entitlement-source outage.
+  const [renderGatedExample, resolved] = await Promise.all([
+    shouldRenderGatedExample(),
+    resolveDefaultRoutinePage(),
+  ])
+  // F3: verified with two production builds + a live network capture — the suspected
+  // bundle bloat did not reproduce. `GatedPreview`'s (and therefore `PremiumSheet`'s)
+  // client chunk set is IDENTICAL to `RoutinePageClient`'s own (see the matching comment
+  // in `app/chat/page.tsx`), i.e. that code already ships on this route via a chunk shared
+  // for unrelated reasons, so a dynamic import here would move nothing. Kept static.
+  if (renderGatedExample) return <GatedRoutineExample />
+
   if (resolved.kind === "legacy") return <RoutinePageClient />
 
   if (resolved.kind === "unavailable") {

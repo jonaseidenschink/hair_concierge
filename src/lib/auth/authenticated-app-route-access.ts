@@ -2,6 +2,7 @@ import "server-only"
 
 import { getEntitlements, type EntitlementTier } from "@/lib/entitlements"
 import { hasFreemiumPaidAccess, type FreemiumAccessResult } from "@/lib/entitlements/access"
+import { isFreemiumScannerFirstEnabled } from "@/lib/entitlements/flag"
 import {
   hasCompletedQuizDiagnostics,
   type PersistedQuizDiagnosticsProfile,
@@ -81,7 +82,7 @@ export async function loadScanRouteAccess(): Promise<ScanRouteAccess> {
   })
 }
 
-export type ScanPageTierDependencies = {
+export type AuthenticatedAppPageTierDependencies = {
   getUser: () => Promise<{
     id: string
     email?: string | null
@@ -93,6 +94,14 @@ export type ScanPageTierDependencies = {
     fieldTestGuest: boolean,
   ) => Promise<FreemiumAccessResult>
 }
+
+/**
+ * Original PR2 name, kept as an alias: `/scan` was the first page to need this
+ * composite, but nothing in it is scan-specific — T12's gated Routine/Anwendung/Chat
+ * pages read the very same tier. Existing `/scan` callers and their tests keep
+ * compiling against the old name.
+ */
+export type ScanPageTierDependencies = AuthenticatedAppPageTierDependencies
 
 /**
  * PR2 review fix (C1): `/scan`'s `tier` prop gates BEHAVIORAL surfaces since T9 (locked
@@ -115,8 +124,8 @@ export type ScanPageTierDependencies = {
  * this repo's convention is "premium = no free surfaces", never "free" as the fail-closed
  * choice — mirrored from the same fail-closed rule on `/api/scan/resolve`.
  */
-export async function resolveScanPageTier(
-  deps: ScanPageTierDependencies,
+export async function resolveAuthenticatedAppPageTier(
+  deps: AuthenticatedAppPageTierDependencies,
 ): Promise<EntitlementTier> {
   const user = await deps.getUser()
   if (!user) return "premium"
@@ -134,17 +143,30 @@ export async function resolveScanPageTier(
   return entitlements.tier
 }
 
+/** PR2 name for the route-agnostic resolver above; see `ScanPageTierDependencies`. */
+export const resolveScanPageTier = resolveAuthenticatedAppPageTier
+
 /**
  * Separate from `loadScanRouteAccess`'s own `getUser` call: that dependency's return type
  * carries only `{ id }` (the shape `resolveScanRouteAccess` needs), so the email + `access_kind`
- * `resolveScanPageTier` needs have no path from it without a second `auth.getUser()` read — a
- * deliberate, request-scoped read, same pattern as `resolvePaidAccessForCurrentUser` on
- * `/api/scan/resolve`.
+ * `resolveAuthenticatedAppPageTier` needs have no path from it without a second
+ * `auth.getUser()` read — a deliberate, request-scoped read, same pattern as
+ * `resolvePaidAccessForCurrentUser` on `/api/scan/resolve`.
+ *
+ * T12 adds the flag short-circuit at the top. It changes no outcome —
+ * `hasFreemiumPaidAccess` already returns `"allowed"` (hence `"premium"`) with zero
+ * billing/moderator lookups while the flag is off — it only skips the request-scoped
+ * `auth.getUser()` read in that state, so a flag-off render of Routine/Anwendung/Chat
+ * stays cost-identical, not just byte-identical, to today.
  */
-export async function loadScanPageTier(): Promise<EntitlementTier> {
+export async function loadAuthenticatedAppPageTier(): Promise<EntitlementTier> {
+  if (!isFreemiumScannerFirstEnabled()) return "premium"
   const supabase = await createClient()
-  return resolveScanPageTier({
+  return resolveAuthenticatedAppPageTier({
     getUser: async () => (await supabase.auth.getUser()).data.user,
     resolvePaidAccess: hasFreemiumPaidAccess,
   })
 }
+
+/** PR2 name for the route-agnostic loader above. */
+export const loadScanPageTier = loadAuthenticatedAppPageTier
