@@ -90,6 +90,17 @@ export const PERSONAL_PLAN_LAUNCH_PRICING_PLANS: readonly StripePricingPlan[] = 
 
 export const DEFAULT_PRICING_INTERVAL: BillingInterval = "quarter"
 
+/**
+ * The secondary line under a plan's name — „~€8,33 / Monat · 44% sparen".
+ *
+ * Lives here rather than in one selector so every plan-row surface (the offer page's
+ * `SubscriptionPlanSelector` and the Premium sheet) reads the same catalog fields in the
+ * same order.
+ */
+export function formatStripePlanDetail(plan: StripePricingPlan): string {
+  return [plan.perMonth, plan.savings].filter(Boolean).join(" · ")
+}
+
 export function getStripePricingPlans(
   catalog: SubscriptionPricingCatalog = "standard",
 ): readonly StripePricingPlan[] {

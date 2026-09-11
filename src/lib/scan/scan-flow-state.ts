@@ -191,6 +191,26 @@ export type ScanFlowAction =
     }
   | { type: "premium_sheet_opened"; context: PremiumSheetContext }
   | { type: "premium_sheet_closed" }
+  /**
+   * A purchase the SERVER verified has completed (freemium T14, fix round 1 F1). Dispatched
+   * only from `PremiumSheet`'s `onUnlocked`, which is reachable exclusively through
+   * `/api/freemium/purchase/complete` re-reading the Session from Stripe — so this is
+   * server-derived evidence, not the client-side entitlement guess this reducer refuses
+   * everywhere else.
+   *
+   * `state.tier` is deliberately sticky (see `nextScanTierSignal`), and `router.refresh()`
+   * re-serves the surface's server props without touching reducer state, so nothing else
+   * can wash a proven `"free"` back out. Without this action the buyer came back from the
+   * purchase to a still-locked Merken bookmark.
+   *
+   * Deliberately leaves `step`/`result` untouched — a purchase proves the tier, it does
+   * not hand back a new verdict. Fix round 2: when the step on screen is a masked
+   * `in_catalog` verdict, `scan-flow.tsx`'s `handleTierUpgraded` (the component-level
+   * `onUnlocked` handler, not this reducer) separately re-resolves that same product
+   * through the ordinary tokened `resolve()` machinery, so the buyer who purchased to see
+   * alternatives actually sees them instead of the stale masked card.
+   */
+  | { type: "tier_upgraded" }
   | { type: "submit_started"; token: number }
   | { type: "submitted"; token: number; pending: ScanPendingSubmissionResult }
   | { type: "submit_failed"; token: number; error: string }
@@ -391,10 +411,27 @@ export function scanFlowReducer(state: ScanFlowState, action: ScanFlowAction): S
       }
 
     case "premium_sheet_opened":
+      // A caller whose tier is already proven premium has no gate to open (fix round 1,
+      // F1): the only way to reach this after a purchase is an affordance left over on the
+      // masked verdict already on screen, and the sheet is terminal after its own unlock —
+      // it would render benefits with no CTA and no way forward.
+      if (state.tier === "premium") return state
       return { ...state, premiumSheet: action.context }
 
     case "premium_sheet_closed":
       return { ...state, premiumSheet: null }
+
+    case "tier_upgraded":
+      // Everything this clears is a free-tier affordance: the paywall itself, and the two
+      // trigger cards that pitch it. Leaving any of them would let a buyer re-open a sheet
+      // that is terminal after its own unlock and shows no CTA at all.
+      return {
+        ...state,
+        tier: "premium",
+        premiumSheet: null,
+        activeProactiveTrigger: null,
+        zweiScansGleicheKategorie: false,
+      }
 
     case "resolve_failed":
       if (!owns(state, "resolve", action.token)) return state

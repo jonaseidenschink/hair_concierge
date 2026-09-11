@@ -11,7 +11,20 @@ export type Stage1Entitlement = {
   qualifiedAt: string | null
   artifactLeadId: string | null
   quizSourceKind?: "personal_plan" | "legacy" | null
-  sourceKind?: "one_time" | "launch_subscription" | "field_test" | "partner" | "migration" | null
+  /**
+   * `"freemium"` is the T14 Premium-sheet admission (see
+   * `src/lib/personal-plan/freemium-enrollment.ts`); it is cohort-qualified for the same
+   * reason `"field_test"`/`"partner"`/`"migration"` are — there is no historical cohort of
+   * freemium buyers the new-buyer cutoff needs to keep out.
+   */
+  sourceKind?:
+    | "one_time"
+    | "launch_subscription"
+    | "field_test"
+    | "partner"
+    | "migration"
+    | "freemium"
+    | null
 }
 
 export type Stage1PreparedArtifact = {
@@ -194,7 +207,8 @@ function isEligibleQualifiedOwner(
   if (Number.isNaN(qualifiedAt.getTime())) return false
   return entitlement.sourceKind === "field_test" ||
     entitlement.sourceKind === "partner" ||
-    entitlement.sourceKind === "migration"
+    entitlement.sourceKind === "migration" ||
+    entitlement.sourceKind === "freemium"
     ? true
     : isMigrationPaidSource(entitlement.sourceKind) && migrationEnabled
       ? true

@@ -18,6 +18,7 @@ import {
 } from "@/components/checkout/active-subscription-dialog"
 import { PaymentFeedbackCard } from "@/components/checkout/payment-feedback-card"
 import { usePaymentSupportReport } from "@/components/checkout/use-payment-support-report"
+import { usePlanSelection } from "@/components/checkout/use-plan-selection"
 import type { QuizResultReferencePrices } from "@/components/checkout/plan-reference-prices"
 import { SubscriptionPlanSelector } from "@/components/checkout/subscription-plan-selector"
 import {
@@ -752,7 +753,6 @@ function MembershipResultOfferPricing({
   const handledRequestsRef = useRef(new Set<number>())
   const lockRef = useRef<LockedCheckoutProvider | null>(null)
   const selectionIndexRef = useRef(0)
-  const planSelectionIndexRef = useRef(0)
   const optionViewsRef = useRef(new Set<string>())
   const stripeFunnelEventRef = useRef<{ attemptId: string; funnelEventId: string } | null>(null)
   const rotateStripeSessionAttemptOnRetryRef = useRef(true)
@@ -764,8 +764,9 @@ function MembershipResultOfferPricing({
   attemptsRef.current ??= createCheckoutAttemptController(createFunnelEventId)
   const attempts = attemptsRef.current
   const offerContext = useOfferTrackingContext()
-  const [selectedInterval, setSelectedInterval] =
-    useState<BillingInterval>(DEFAULT_PRICING_INTERVAL)
+  const { selectedInterval, selectPlan } = usePlanSelection({
+    defaultInterval: DEFAULT_PRICING_INTERVAL,
+  })
   const [checkoutInterval, setCheckoutInterval] = useState<BillingInterval | null>(null)
   const [checkoutVisible, setCheckoutVisible] = useState(false)
   const [attemptId, setAttemptId] = useState<string | null>(null)
@@ -1418,6 +1419,7 @@ function MembershipResultOfferPricing({
         onContinue={openCheckout}
         onSelect={(interval) => {
           if (lockRef.current) return
+          const change = selectPlan(interval)
           if (offerContext) {
             const plan = getStripePricingPlan(interval, pricingCatalog)
             trackAppEvent("offer_plan_selected", {
@@ -1425,16 +1427,14 @@ function MembershipResultOfferPricing({
               currency: plan.currency,
               funnelEventId: createFunnelEventId(),
               interval,
-              isDefault: interval === DEFAULT_PRICING_INTERVAL,
+              isDefault: change.isDefault,
               planId: plan.analyticsId,
               pricingCatalog,
-              previousInterval: selectedInterval,
-              selectionIndex: planSelectionIndexRef.current + 1,
+              previousInterval: change.previousInterval,
+              selectionIndex: change.selectionIndex,
               value: plan.amount,
             })
           }
-          planSelectionIndexRef.current += 1
-          setSelectedInterval(interval)
           endCheckout({ endReason: "plan_changed" })
         }}
         pricingCatalog={pricingCatalog}

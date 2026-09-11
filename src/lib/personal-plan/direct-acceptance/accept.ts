@@ -4,12 +4,18 @@ import type {
   Stage2RefinementPersistence,
 } from "../persistence/stage2-refinement-service"
 import { PERSONAL_PLAN_STAGE1_COMPUTATION_VERSION } from "../persistence/stage1-service"
-import { stage1PreviewedRoleDecisionKeys } from "../product-previews"
+import {
+  directAcceptanceRefinementRequiredCategories,
+  stage1PreviewedRoleDecisionKeys,
+} from "../product-previews"
 import type {
   Stage3AuthorityEvaluation,
   Stage3AuthoritySemanticIntent,
 } from "../products/authority/contracts"
-import type { Stage3DecisionDeferralReason } from "../products/contracts"
+import type {
+  PersonalPlanCategory,
+  Stage3DecisionDeferralReason,
+} from "../products/contracts"
 import type { Stage3AuthorityProductionGateway } from "../products/production-persistence-gateway"
 import { createPersistedStage2RefinementGateway } from "../refinement/production-persistence-gateway"
 import { buildAssumedAnswerProvenance } from "../refinement/answer-provenance"
@@ -62,6 +68,23 @@ export type DirectAcceptanceSeenRole = {
 
 export type AcceptIdealPlanInput = {
   seenRoles: readonly DirectAcceptanceSeenRole[]
+  /**
+   * Who chose the products (freemium-scanner-first T14).
+   *
+   * - `"seen"` (default, and the ONLY value the public `/api/personal-plan/accept-ideal-plan`
+   *   route can produce — its body schema is `.strict()` and has no such field): the
+   *   consent contract this module was built for. Nothing is planned that the person did
+   *   not look at, and a mismatch between what they saw and what the server evaluates is
+   *   `seen_state_stale`.
+   * - `"server_recommended"`: server-internal post-purchase provisioning, where there is
+   *   no Idealplan screen to have seen. A Premium-sheet buyer is promised a live Routine
+   *   the moment they pay (plan §"Inherited from evidence or contract": immediate
+   *   post-purchase real content, from the approved prototype journey), so the server
+   *   plans its OWN current recommendation for every role that has a buyable one and
+   *   leaves the rest honestly uncovered. `seenRoles` must be empty in this mode — a
+   *   caller that has seen-state should use `"seen"`.
+   */
+  roleSelection?: "seen" | "server_recommended"
 }
 
 export type AcceptIdealPlanResult = {
@@ -171,6 +194,65 @@ export function buildDirectAcceptanceIntents(
 }
 
 /**
+ * The `"server_recommended"` counterpart of `buildDirectAcceptanceIntents` (T14).
+ *
+ * Same two outcomes per role, decided from the server's own evaluations instead of from
+ * client seen-state: a role with a buyable recommendation is planned with exactly that
+ * recommendation; every other role is left uncovered with the same honest deferral reason
+ * the seen-state path would record. Nothing is invented — this plans only what the engine
+ * would recommend anyway, which is precisely what the buyer paid to receive.
+ */
+export function buildServerRecommendedIntents(
+  evaluations: readonly Stage3AuthorityEvaluation[],
+  previewedRoleKeys: ReadonlySet<string>,
+  /**
+   * Categories this mode may NOT decide, even where it has a buyable recommendation
+   * (Nick's D1 ruling, fix round 1). Today exactly one cohort lands here: Scalp Care
+   * deferred on a reported irritation whose detail is unknown. The synthetic refinement
+   * answers that fact with `"normal"`, which is precisely the assumption the product
+   * refuses to make for a person who told us their scalp is irritated — so the role stays
+   * `refinement_required` and the buyer is asked, instead of being handed a scalp product
+   * chosen under a guess. Every other role still lands, so the „real content immediately
+   * after purchase" promise holds. See `directAcceptanceRefinementRequiredCategories`.
+   */
+  refinementRequiredCategories: ReadonlySet<PersonalPlanCategory> = new Set(),
+): Stage3AuthoritySemanticIntent[] {
+  const evaluatedKeys = new Set(evaluations.map((evaluation) => evaluation.subjectKey))
+  // Same server invariant the seen-state path asserts: one subject, one evaluation.
+  if (evaluatedKeys.size !== evaluations.length) {
+    throw new DirectAcceptanceError("seen_state_stale")
+  }
+  return evaluations.flatMap((evaluation): Stage3AuthoritySemanticIntent[] => {
+    const refinementRequired = refinementRequiredCategories.has(evaluation.category)
+    if (!refinementRequired && hasBuyableRecommendation(evaluation)) {
+      return [
+        {
+          type: "resolve_decision" as const,
+          subjectKey: evaluation.subjectKey,
+          action: "plan_recommendation" as const,
+        },
+      ]
+    }
+    // An authority that does not even allow leaving the role uncovered has no decision this
+    // flow may author — completion reports it rather than this code forging an action.
+    if (!evaluation.allowedActions.includes("leave_uncovered" as never)) return []
+    return [
+      {
+        type: "resolve_decision" as const,
+        subjectKey: evaluation.subjectKey,
+        action: "leave_uncovered" as const,
+        // A blocked category is `refinement_required` by definition — its roles exist only
+        // because the defaults answered a deferred fact, which is exactly what the buyer is
+        // being routed to Feinschliff to answer for real.
+        deferralReason: refinementRequired
+          ? "refinement_required"
+          : deferralReasonFor(evaluation, previewedRoleKeys),
+      },
+    ]
+  })
+}
+
+/**
  * Server truth only — two independent facts, three reasons:
  *
  *   - the role was NOT previewable at all → it exists only because the
@@ -209,8 +291,15 @@ export async function acceptIdealPlan(
   if (!deps.flags.stage2Enabled || !deps.flags.stage3Enabled || !deps.flags.stage4Enabled) {
     throw new DirectAcceptanceError("stage_not_available")
   }
+  const serverRecommended = input.roleSelection === "server_recommended"
+  // The two modes are mutually exclusive by construction: seen-state in server-recommended
+  // mode would silently be ignored, which is exactly the kind of half-applied consent this
+  // module refuses elsewhere.
+  if (serverRecommended && input.seenRoles.length > 0) {
+    throw new DirectAcceptanceError("seen_state_stale")
+  }
 
-  const { personalPlanId, refinedVersionId, previewedRoleKeys } =
+  const { personalPlanId, refinedVersionId, previewedRoleKeys, refinementRequiredCategories } =
     await completeSyntheticRefinement(deps)
   const loaded = await deps.stage3Gateway.loadOrCreate({
     draftId: "server-derived",
@@ -222,11 +311,10 @@ export async function acceptIdealPlan(
 
   let draft = loaded.draft
   if (draft.status === "active") {
-    const intents = buildDirectAcceptanceIntents(
-      await deps.stage3Gateway.evaluateDecisions({ draftId: draft.draftId }),
-      input.seenRoles,
-      previewedRoleKeys,
-    )
+    const evaluations = await deps.stage3Gateway.evaluateDecisions({ draftId: draft.draftId })
+    const intents = serverRecommended
+      ? buildServerRecommendedIntents(evaluations, previewedRoleKeys, refinementRequiredCategories)
+      : buildDirectAcceptanceIntents(evaluations, input.seenRoles, previewedRoleKeys)
     if (intents.length > 0) {
       const resolved = await deps.stage3Gateway.resolveDecisions({
         draftId: draft.draftId,
@@ -293,6 +381,7 @@ async function completeSyntheticRefinement(deps: AcceptIdealPlanDeps): Promise<{
   personalPlanId: string
   refinedVersionId: string
   previewedRoleKeys: ReadonlySet<string>
+  refinementRequiredCategories: ReadonlySet<PersonalPlanCategory>
 }> {
   const draft = await deps.refinementPersistence.loadOrCreate(deps.userId)
   const defaults = buildDirectAcceptanceStage2Defaults(draft.triggerContext)
@@ -316,13 +405,15 @@ async function completeSyntheticRefinement(deps: AcceptIdealPlanDeps): Promise<{
   }
 
   // Only computed once the guards above have let this accept through.
-  const previewedRoleKeys = stage1PreviewedRoleKeysForDraft(draft)
+  const { previewedRoleKeys, refinementRequiredCategories } =
+    stage1PreviewedRoleKeysForDraft(draft)
 
   if (draft.status === "complete" && draft.refinedVersionId) {
     return {
       personalPlanId: draft.personalPlanId,
       refinedVersionId: draft.refinedVersionId,
       previewedRoleKeys,
+      refinementRequiredCategories,
     }
   }
 
@@ -347,6 +438,7 @@ async function completeSyntheticRefinement(deps: AcceptIdealPlanDeps): Promise<{
     personalPlanId: draft.personalPlanId,
     refinedVersionId: handoff.refinedVersionId,
     previewedRoleKeys,
+    refinementRequiredCategories,
   }
 }
 
@@ -360,7 +452,10 @@ async function completeSyntheticRefinement(deps: AcceptIdealPlanDeps): Promise<{
  * which makes every unresolved role `refinement_required`: the conservative
  * side, since it never claims a product gap the plan cannot prove.
  */
-function stage1PreviewedRoleKeysForDraft(draft: Stage2PersistedDraft): ReadonlySet<string> {
+function stage1PreviewedRoleKeysForDraft(draft: Stage2PersistedDraft): {
+  previewedRoleKeys: ReadonlySet<string>
+  refinementRequiredCategories: ReadonlySet<PersonalPlanCategory>
+} {
   const computed = computeNeedPlan({
     rawEnvelope: draft.baseInputSnapshot,
     artifactId: draft.preparedArtifactSourceId,
@@ -368,7 +463,14 @@ function stage1PreviewedRoleKeysForDraft(draft: Stage2PersistedDraft): ReadonlyS
     computationVersion: PERSONAL_PLAN_STAGE1_COMPUTATION_VERSION,
     createdAt: new Date().toISOString(),
   })
-  return computed.status === "ready"
-    ? stage1PreviewedRoleDecisionKeys(computed.snapshot)
-    : new Set<string>()
+  if (computed.status !== "ready") {
+    return { previewedRoleKeys: new Set<string>(), refinementRequiredCategories: new Set() }
+  }
+  return {
+    previewedRoleKeys: stage1PreviewedRoleDecisionKeys(computed.snapshot),
+    // Same predicate the Idealplan payload uses to refuse direct acceptance outright (D1).
+    refinementRequiredCategories: new Set(
+      directAcceptanceRefinementRequiredCategories(computed.snapshot),
+    ),
+  }
 }

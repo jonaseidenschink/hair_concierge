@@ -1127,6 +1127,129 @@ test("free tier: Merken opens the Premium sheet instead of the Merkliste or the 
   assert.equal(requireByType(flow.tree, ScanWishlistSheet, "ScanWishlistSheet").props.open, false)
 })
 
+test("F1: a verified purchase unlocks Merken on this surface, with no reload", async () => {
+  // The whole point of the contextual finish (journey step 9): the gate the buyer started
+  // from opens with its REAL behaviour. `router.refresh()` re-serves the `tier` prop but
+  // cannot touch this reducer, and `state.tier` is sticky — so the sheet has to say so.
+  let resolveCalls = 0
+  const flow = await mountFlow(async (url) => {
+    if (url === "/api/scan/resolve") {
+      resolveCalls += 1
+      // Fix round 2: `onUnlocked` re-resolves the masked verdict on screen. In production
+      // the server only unmasks it once the purchase has actually settled, so the mock's
+      // SECOND call (the re-resolve `handleTierUpgraded` fires) answers unmasked, same as
+      // a real post-purchase resolve would.
+      return json(resolveCalls === 1 ? maskedVerdict() : premiumVerdict())
+    }
+    if (url === "/api/scan/wishlist") return json({ entries: [] })
+    return notFound()
+  })
+  await scanInto(flow)
+
+  footerProps(flow.tree).onSave()
+  await flow.settle()
+  assert.equal(premiumSheetProps(flow.tree).open, true)
+
+  // What `PremiumSheet` calls after `/api/freemium/purchase/complete` verified the money.
+  premiumSheetProps(flow.tree).onUnlocked()
+  await flow.settle()
+
+  assert.equal(premiumSheetProps(flow.tree).open, false, "the paywall is gone")
+  assert.equal(wishlistTriggerProps(flow.tree).locked, false)
+  assert.equal(footerProps(flow.tree).saveLocked, false)
+  // Fix round 2: the masked verdict re-resolved once, and the card is now the full,
+  // unmasked one instead of the stale blurred comparison table.
+  assert.equal(resolveCalls, 2)
+  assert.equal(cardProps(flow.tree).result.freeRevealAvailable, undefined)
+
+  // Merken now does the real thing instead of re-opening a sheet with no CTA.
+  footerProps(flow.tree).onSave()
+  await flow.settle()
+  assert.equal(requireByType(flow.tree, ScanSaveSheet, "ScanSaveSheet").props.open, true)
+  assert.equal(premiumSheetProps(flow.tree).open, false)
+})
+
+test("fix round 2: a purchase from a masked verdict re-resolves the SAME product and renders full alternatives", async () => {
+  const fullAlternative = {
+    productId: "p-alt",
+    displayName: "Lab Shampoo Gamma",
+    imageUrl: null,
+    priceLabel: "9,99 €",
+    netContentLabel: null,
+    verdict: "ideal" as const,
+    verdictLabel: "Passt",
+  }
+  const resolveBodies: string[] = []
+  const flow = await mountFlow(async (url, init) => {
+    if (url === "/api/scan/resolve") {
+      resolveBodies.push(String(init?.body))
+      return resolveBodies.length === 1
+        ? json(maskedVerdict("p-a"))
+        : json({ ...premiumVerdict("p-a"), alternatives: [fullAlternative] })
+    }
+    return notFound()
+  })
+  await scanInto(flow)
+  assert.equal(cardProps(flow.tree).result.freeRevealAvailable, true)
+
+  // What `PremiumSheet` calls after `/api/freemium/purchase/complete` verified the money —
+  // no reveal was ever spent here, so before this fix the masked comparison table (and its
+  // inert "Was passt stattdessen?" CTA) would be all a buyer who just paid for it ever sees.
+  premiumSheetProps(flow.tree).onUnlocked()
+  await flow.settle()
+
+  assert.equal(resolveBodies.length, 2, "re-resolves exactly once")
+  assert.deepEqual(JSON.parse(resolveBodies[1]), { productId: "p-a" })
+  assert.equal(cardProps(flow.tree).result.freeRevealAvailable, undefined)
+  assert.deepEqual(cardProps(flow.tree).result.alternatives, [fullAlternative])
+})
+
+test("fix round 2: an unknown result has nothing masked on screen, so tier_upgraded re-resolves nothing", async () => {
+  let resolveCalls = 0
+  const flow = await mountFlow(async (url) => {
+    if (url === "/api/scan/resolve") {
+      resolveCalls += 1
+      return json(unknownResult)
+    }
+    return notFound()
+  })
+  await scanInto(flow)
+  assert.equal(resolveCalls, 1)
+
+  // `handleTierUpgraded` (fix round 2) only re-resolves a MASKED `in_catalog` verdict —
+  // the `unknown` step here has no such thing, so the guard must refuse to refetch.
+  premiumSheetProps(flow.tree).onUnlocked()
+  await flow.settle()
+  assert.equal(resolveCalls, 1)
+})
+
+test("F2: a redirect return asks this surface to reopen the sheet on its own gate", async () => {
+  const flow = await mountFlow(async () => json(maskedVerdict()))
+  await scanInto(flow)
+  sheetProps(flow.tree).onClose()
+  await flow.settle()
+  assert.equal(premiumSheetProps(flow.tree).open, false)
+
+  // What `PremiumSheet` calls when a PayPal return lands `pending` or `failed`.
+  premiumSheetProps(flow.tree).onRequestOpen({ feature: "routine", source: "scan:verdict" })
+  await flow.settle()
+  assert.equal(premiumSheetProps(flow.tree).open, true)
+  assert.deepEqual(premiumSheetProps(flow.tree).context, {
+    feature: "routine",
+    source: "scan:verdict",
+  })
+
+  // Nothing remembered → the surface's own default gate, never a closed sheet.
+  premiumSheetProps(flow.tree).onClose()
+  await flow.settle()
+  premiumSheetProps(flow.tree).onRequestOpen(null)
+  await flow.settle()
+  assert.deepEqual(premiumSheetProps(flow.tree).context, {
+    feature: "merkliste",
+    source: "scan:verdict",
+  })
+})
+
 test("premium: an unmasked verdict leaves every Merken and reveal affordance untouched", async () => {
   const flow = await mountFlow(async (url) => {
     if (url === "/api/scan/resolve") return json(premiumVerdict())

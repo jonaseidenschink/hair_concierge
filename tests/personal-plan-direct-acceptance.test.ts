@@ -1077,6 +1077,47 @@ test("a blocked category the client never saw is accepted as a deferred decision
 })
 
 /**
+ * D1 (freemium T14, fix round 1). The post-purchase provisioning lane runs this same chain
+ * in `server_recommended` mode, where there is no seen-state to hold it back — so the
+ * cohort the Idealplan REFUSES direct acceptance for would otherwise be handed a scalp
+ * product chosen under the synthetic „normal" irritation answer. The lab envelope IS that
+ * cohort (scalp care deferred on a reported irritation, oily scalp), so the ruling is
+ * asserted end to end: everything else is planned, scalp care alone stays for Feinschliff.
+ */
+test("D1: server-recommended acceptance leaves the blocked scalp cohort to the refinement", async () => {
+  const blocked = knownEvaluation("scalp_care", "scalp_flake_oil_adjunct", "p-scalp")
+  const harness = createHarness({ evaluations: [...MULTI_ROLE_EVALUATIONS, blocked] })
+
+  const result = await acceptIdealPlan(harness.deps, {
+    seenRoles: [],
+    roleSelection: "server_recommended",
+  })
+
+  assert.equal(result.status, "accepted")
+  const resolveCall = harness.stage3Calls.find((call) => call.kind === "resolveDecisions")
+  assert.ok(resolveCall && resolveCall.kind === "resolveDecisions")
+  assert.deepEqual(
+    resolveCall.intents.filter((intent) => intent.action === "leave_uncovered"),
+    [
+      {
+        type: "resolve_decision",
+        subjectKey: blocked.subjectKey,
+        action: "leave_uncovered",
+        deferralReason: "refinement_required",
+      },
+    ],
+    "scalp care is the only role the buyer is asked about instead of being guessed for",
+  )
+  assert.deepEqual(
+    resolveCall.intents
+      .filter((intent) => intent.action === "plan_recommendation")
+      .map((intent) => intent.subjectKey),
+    MULTI_ROLE_EVALUATIONS.map((evaluation) => evaluation.subjectKey),
+    "every other role still lands, so the post-purchase promise holds",
+  )
+})
+
+/**
  * The role WAS on a card, but as a "wird nach der Verfeinerung konkret"
  * fallback, so the client echoes nothing for it. The deferral reason must say
  * that no product was available, not that a refinement answer is missing.

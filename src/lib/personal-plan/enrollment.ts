@@ -20,6 +20,21 @@ import {
   isPersonalPlanLegacyMigrationEnabled,
   resolvePersonalPlanMigrationAdmission,
 } from "./migration-admission"
+import { resolveFreemiumPlanEnrollment } from "./freemium-enrollment"
+
+/**
+ * `"freemium"` (freemium-scanner-first T14) is the Premium-sheet purchase source: a
+ * STANDARD-catalog subscription admitted by an explicit `freemium_plan_admissions` record.
+ * It is a peer of the other kinds, not a variant of `"launch_subscription"` — that branch
+ * is untouched.
+ */
+export type PersonalPlanEnrollmentSourceKind =
+  | "one_time"
+  | "launch_subscription"
+  | "field_test"
+  | "partner"
+  | "migration"
+  | "freemium"
 
 export type PersonalPlanEnrollment = {
   accessState: OneTimeAccessState
@@ -28,7 +43,7 @@ export type PersonalPlanEnrollment = {
   qualifiedAt: string | null
   artifactLeadId: string | null
   quizSourceKind: "personal_plan" | "legacy" | null
-  sourceKind: "one_time" | "launch_subscription" | "field_test" | "partner" | "migration" | null
+  sourceKind: PersonalPlanEnrollmentSourceKind | null
 }
 
 type CorrelationRow = {
@@ -274,6 +289,23 @@ export async function findPersonalPlanEnrollmentForUser(
           }
         }
       }
+    }
+  }
+
+  // Freemium (Premium-sheet) admission — T14. Deliberately AFTER the launch-subscription
+  // branch above, so a user who somehow holds both keeps the launch enrollment they already
+  // had; and gated on an explicit `freemium_plan_admissions` row plus a live paid-authority
+  // recheck inside the resolver, so it is inert for every pre-T14 user and with the flag off.
+  const freemium = await resolveFreemiumPlanEnrollment(supabase, userId, now)
+  if (freemium) {
+    return {
+      accessState: "active",
+      sourceId: freemium.sourceId,
+      paidAt: freemium.admittedAt,
+      qualifiedAt: freemium.admittedAt,
+      artifactLeadId: freemium.leadId,
+      quizSourceKind: "personal_plan",
+      sourceKind: "freemium",
     }
   }
 

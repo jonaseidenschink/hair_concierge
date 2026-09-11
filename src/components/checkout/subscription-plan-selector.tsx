@@ -8,14 +8,11 @@ import {
 import type { BillingInterval } from "@/lib/stripe/intervals"
 import {
   DEFAULT_PRICING_INTERVAL,
+  formatStripePlanDetail,
   getStripePricingPlan,
   getStripePricingPlans,
   type SubscriptionPricingCatalog,
 } from "@/lib/stripe/pricing-plans"
-
-function getPlanDetail(plan: ReturnType<typeof getStripePricingPlan>): string {
-  return [plan.perMonth, plan.savings].filter(Boolean).join(" · ")
-}
 
 export function SubscriptionPlanSelector({
   actionLabel,
@@ -98,7 +95,7 @@ export function SubscriptionPlanSelector({
                   {plan.name}
                 </span>
                 <span className="mt-1 block text-[11px] leading-snug text-muted-foreground">
-                  {[plan.price, getPlanDetail(plan)].filter(Boolean).join(" · ")}
+                  {[plan.price, formatStripePlanDetail(plan)].filter(Boolean).join(" · ")}
                 </span>
               </span>
               <span className="flex shrink-0 flex-col items-end gap-1">

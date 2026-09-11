@@ -23,7 +23,10 @@ import {
   type PersonalPlanJourneyAccess,
   type PersonalPlanJourneyAccessInput,
 } from "./journey-access"
-import { findPersonalPlanEnrollmentForUser } from "./enrollment"
+import {
+  findPersonalPlanEnrollmentForUser,
+  type PersonalPlanEnrollmentSourceKind,
+} from "./enrollment"
 import { isPersonalPlanLegacyMigrationEnabled } from "./migration-admission"
 
 type AccessState = PersonalPlanJourneyAccessInput["accessState"]
@@ -38,7 +41,7 @@ export type PersonalPlanJourneyAccessLoaderDeps = {
     qualifiedAt: string | null
     artifactLeadId: string | null
     quizSourceKind?: "personal_plan" | "legacy" | null
-    sourceKind?: "one_time" | "launch_subscription" | "field_test" | "partner" | "migration" | null
+    sourceKind?: PersonalPlanEnrollmentSourceKind | null
   }>
   cohortCutoff: () => Date | null
   migrationEnabled?: () => boolean
@@ -121,22 +124,27 @@ function phaseElapsed(reporter: JourneyAccessPhaseReporter | undefined, startedA
 function isQualifiedOwnerCohort(
   qualifiedAt: string | null,
   cutoff: Date | null,
-  sourceKind?: "one_time" | "launch_subscription" | "field_test" | "partner" | "migration" | null,
+  sourceKind?: PersonalPlanEnrollmentSourceKind | null,
   migrationEnabled = false,
 ): boolean {
   if (!qualifiedAt) return false
   const parsed = new Date(qualifiedAt)
   if (Number.isNaN(parsed.getTime())) return false
-  return sourceKind === "field_test" || sourceKind === "partner" || sourceKind === "migration"
+  // `"freemium"` (T14) joins the non-billing-cohort kinds: the new-buyer cutoff exists to
+  // keep pre-Personal-Plan *purchasers* out of the app journey, and a Premium-sheet
+  // admission can only be created by this program's own post-cutoff code path — there is no
+  // historical freemium cohort for it to admit by accident.
+  return sourceKind === "field_test" ||
+    sourceKind === "partner" ||
+    sourceKind === "migration" ||
+    sourceKind === "freemium"
     ? true
     : isMigrationPaidSource(sourceKind) && migrationEnabled
       ? true
       : Boolean(cutoff && parsed.getTime() >= cutoff.getTime())
 }
 
-function isMigrationPaidSource(
-  sourceKind?: "one_time" | "launch_subscription" | "field_test" | "partner" | "migration" | null,
-): boolean {
+function isMigrationPaidSource(sourceKind?: PersonalPlanEnrollmentSourceKind | null): boolean {
   return sourceKind === "one_time" || sourceKind === "launch_subscription"
 }
 

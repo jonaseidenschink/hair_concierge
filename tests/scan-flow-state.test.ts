@@ -813,6 +813,40 @@ test("scanFlowReducer: a new resolve and a return to scanning both drop what the
   })
 })
 
+test("tier_upgraded: a verified purchase unlocks this surface and clears every free-tier pitch", () => {
+  // Fix round 1 (F1). `state.tier` is sticky and `router.refresh()` cannot reach it, so the
+  // sheet dispatches this after the server verified the purchase. Everything cleared here
+  // is a free-tier affordance — the paywall itself and the two cards that pitch it.
+  const pitching = scanFlowReducer(
+    {
+      ...maskedShown(),
+      activeProactiveTrigger: "wiederkehrer",
+      zweiScansGleicheKategorie: true,
+    },
+    { type: "premium_sheet_opened", context: { feature: "merkliste", source: "scan:verdict" } },
+  )
+  assert.equal(pitching.tier, "free")
+  assert.notEqual(pitching.premiumSheet, null)
+
+  const unlocked = scanFlowReducer(pitching, { type: "tier_upgraded" })
+  assert.equal(unlocked.tier, "premium")
+  assert.equal(unlocked.premiumSheet, null)
+  assert.equal(unlocked.activeProactiveTrigger, null)
+  assert.equal(unlocked.zweiScansGleicheKategorie, false)
+  // The verdict on screen is untouched — the purchase changes what is locked, not the scan.
+  assert.deepEqual(unlocked.step, pitching.step)
+
+  // And a leftover affordance on that masked verdict can no longer reopen a sheet that is
+  // terminal after its own unlock (it would render benefits with no CTA).
+  assert.equal(
+    scanFlowReducer(unlocked, {
+      type: "premium_sheet_opened",
+      context: { feature: "empfehlungen", source: "scan:verdict" },
+    }).premiumSheet,
+    null,
+  )
+})
+
 test("scanFlowReducer: the Premium sheet opens with its context, closes empty, and pauses detection", () => {
   const opened = scanFlowReducer(maskedShown(), {
     type: "premium_sheet_opened",

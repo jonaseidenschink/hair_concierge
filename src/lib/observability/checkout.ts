@@ -4,7 +4,13 @@ export { scrubSentryBreadcrumb, scrubSentryEvent } from "@/lib/observability/sen
 
 export type CheckoutProvider = "stripe" | "paypal"
 export type CheckoutInterval = "month" | "quarter" | "year"
-export type CheckoutSource = "pricing_page" | "quiz_result_offer" | "welcome" | "reactivation"
+export type CheckoutSource =
+  | "pricing_page"
+  | "quiz_result_offer"
+  | "welcome"
+  | "reactivation"
+  // freemium-scanner-first T14: checkout started inside the Premium sheet.
+  | "premium_sheet"
 
 export type CheckoutStage =
   | "stripe_checkout_session_create"

@@ -4,6 +4,8 @@ import path from "node:path"
 import test from "node:test"
 import React from "react"
 import { renderToStaticMarkup } from "react-dom/server"
+import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime"
+import { PathnameContext } from "next/dist/shared/lib/hooks-client-context.shared-runtime"
 
 import { GatedAnwendungExample } from "../src/components/gated-preview/gated-anwendung-example"
 import { GatedChatExample } from "../src/components/gated-preview/gated-chat-example"
@@ -226,8 +228,41 @@ test("the sheet context is the page's own", () => {
 
 // --- rendered examples ------------------------------------------------------
 
+/**
+ * T14: `PremiumSheet` (mounted by every gated composition) now uses the app router to
+ * refresh the surface after a purchase. `useRouter`/`usePathname` throw outside the App
+ * Router's own contexts, which a bare `renderToStaticMarkup` does not provide — so supply
+ * them here. The router is a throwing stub on purpose: a gated render that navigates or
+ * refreshes would be exactly the mutation these tests exist to forbid.
+ */
+function withAppRouter(node: React.ReactElement): React.ReactElement {
+  const router = {
+    back: () => {
+      throw new Error("gated render must not navigate")
+    },
+    forward: () => {
+      throw new Error("gated render must not navigate")
+    },
+    push: () => {
+      throw new Error("gated render must not navigate")
+    },
+    replace: () => {
+      throw new Error("gated render must not navigate")
+    },
+    refresh: () => {
+      throw new Error("gated render must not refresh")
+    },
+    prefetch: () => {},
+  }
+  return (
+    <AppRouterContext.Provider value={router as never}>
+      <PathnameContext.Provider value="/routine">{node}</PathnameContext.Provider>
+    </AppRouterContext.Provider>
+  )
+}
+
 function render(Composition: () => React.ReactElement) {
-  return renderToStaticMarkup(<Composition />)
+  return renderToStaticMarkup(withAppRouter(<Composition />))
 }
 
 test("the Routine example is the real Routine page, filled with real catalog products", () => {

@@ -18,6 +18,9 @@ import {
   handleSubscriptionDeleted,
   handleInvoicePaymentFailed,
   findProfileByStripeCustomerId,
+  freemiumCheckoutProvisioningUserId,
+  runFreemiumCheckoutProvisioning,
+  type StripeWebhookProvisioningDeps,
 } from "@/lib/stripe/webhook-handlers"
 import { PERSONAL_PLAN_ONCE_KIND } from "@/lib/billing/offer-products"
 import { getStripeTierIds } from "@/lib/stripe/tier-ids"
@@ -59,6 +62,16 @@ import { captureServerPaymentFailure } from "@/lib/observability/payment-server"
 import { resolvePaymentRuntime } from "@/lib/billing/payment-runtime-config"
 
 export const runtime = "nodejs" // raw body required; edge runtime buffers differently
+/**
+ * The function lifetime, which `after()` work runs inside too. T14 runs the freemium
+ * Stage-2→4 provisioning chain here, and every other route that runs that chain —
+ * `accept-ideal-plan`, the stage-2/3 routes, `freemium/purchase/complete` — already asks for
+ * 60s. Since the Codex fix wave (Y1) that chain is awaited inside the response rather than
+ * deferred, bounded by `FREEMIUM_WEBHOOK_PROVISIONING_BUDGET_MS`, so a slow chain gives up
+ * and fails the delivery (claim released, 500, Stripe redelivers) instead of being killed
+ * mid-flight with the event still claimed.
+ */
+export const maxDuration = 60
 
 async function getPremiumTierId(supabase: SupabaseClient) {
   return (await getStripeTierIds(supabase)).premiumTierId
@@ -303,7 +316,7 @@ function scheduleCheckoutCompletedSync(input: {
   })
 }
 
-type StripeWebhookEventDeps = {
+type StripeWebhookEventDeps = StripeWebhookProvisioningDeps & {
   supabase: SupabaseClient
   stripe: Stripe
   defer?: (work: () => void | Promise<void>) => void
@@ -399,6 +412,17 @@ export async function handleStripeWebhookEvent(event: Stripe.Event, deps: Stripe
           timestamp,
         })
       }
+      // T14: the Premium sheet's own post-purchase provisioning, beside — never instead of
+      // — the activation above. AWAITED, and last in this case, since it is the only step
+      // here whose failure has to reach Stripe: it throws when the delivery must be retried
+      // (Codex fix wave, Y1), and the POST catch below releases the event claim and answers
+      // 500 so the redelivery is processable. Running it deferred, as it used to, put the
+      // failure after the response — unreportable and unclaimable, i.e. a buyer who closed
+      // the tab stayed paid-but-unprovisioned forever. Everything above has already run and
+      // is dedupe-guarded, so a retried delivery repeats it harmlessly.
+      if (freemiumCheckoutProvisioningUserId(session, deps)) {
+        await runFreemiumCheckoutProvisioning(session, deps, activation)
+      }
       break
     }
     case "checkout.session.expired": {
@@ -435,6 +459,12 @@ export async function handleStripeWebhookEvent(event: Stripe.Event, deps: Stripe
             supabase,
             timestamp,
           })
+        }
+        // The pending → complete path: an asynchronous payment that settled after the buyer
+        // left the sheet. This is the lane where nobody is watching, so its durability is
+        // the whole point — same awaited, retry-throwing contract as above.
+        if (freemiumCheckoutProvisioningUserId(session, deps)) {
+          await runFreemiumCheckoutProvisioning(session, deps, activation)
         }
       }
       break

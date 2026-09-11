@@ -174,6 +174,26 @@ export async function computeStage1ProductExamplePreviews(input: {
 function resolveDirectAcceptanceAvailability(
   snapshot: InitialNeedPlanSnapshot,
 ): Stage1DirectAcceptanceAvailability {
+  const blockedCategories = directAcceptanceRefinementRequiredCategories(snapshot)
+
+  return blockedCategories.length === 0
+    ? { available: true }
+    : { available: false, reason: "refinement_required", blockedCategories }
+}
+
+/**
+ * The categories the direct-acceptance defaults must NOT decide for this snapshot — see the
+ * contract above.
+ *
+ * Exported because the post-purchase provisioning lane needs the same cohort. Direct
+ * acceptance refuses the whole request for these users; the freemium buyer instead gets
+ * everything else provisioned and only these categories left to the refinement (Nick's D1
+ * ruling, fix round 1). Both readings must come from ONE predicate, or the cohort the
+ * product refuses to guess for and the cohort provisioning skips would drift apart.
+ */
+export function directAcceptanceRefinementRequiredCategories(
+  snapshot: InitialNeedPlanSnapshot,
+): PersonalPlanCategory[] {
   const blockedCategories: PersonalPlanCategory[] = []
 
   const scalpCare = snapshot.decisions.find((decision) => decision.category === "scalp_care")
@@ -184,9 +204,7 @@ function resolveDirectAcceptanceAvailability(
     blockedCategories.push("scalp_care")
   }
 
-  return blockedCategories.length === 0
-    ? { available: true }
-    : { available: false, reason: "refinement_required", blockedCategories }
+  return blockedCategories
 }
 
 function defaultsWouldAddScalpCareRoles(snapshot: InitialNeedPlanSnapshot): boolean {

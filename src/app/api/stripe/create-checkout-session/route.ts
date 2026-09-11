@@ -23,8 +23,16 @@ import {
 import { isPersonalPlanLaunchPricingEnabled } from "@/lib/funnel/flags"
 import {
   resolveSubscriptionPricingCatalog,
+  STANDARD_PRICING_CATALOG,
   type SubscriptionPricingCatalog,
 } from "@/lib/billing/pricing-catalog"
+import { isFreemiumScannerFirstEnabled } from "@/lib/entitlements/flag"
+import { buildFreemiumCheckoutReturnUrl } from "@/lib/freemium/checkout-return"
+import {
+  FREEMIUM_CHECKOUT_MARKER_KEY,
+  FREEMIUM_CHECKOUT_MARKER_VALUE,
+  FREEMIUM_CHECKOUT_USER_KEY,
+} from "@/lib/freemium/checkout-metadata"
 import {
   bindPersonalPlanOneTimeConsentProviderReference,
   createPersonalPlanOneTimeCheckoutConsent,
@@ -61,6 +69,17 @@ type CheckoutAnalyticsPlan =
 
 export const runtime = "nodejs"
 
+/**
+ * freemium-scanner-first T14: `"premium_sheet"` is the third checkout entry point — the
+ * Premium sheet a free user opens from a gate. It is the ONLY source whose price catalog
+ * is pinned server-side (always `standard`, whatever `PERSONAL_PLAN_LAUNCH_PRICING_ENABLED`
+ * says — see the catalog resolution below), because the sheet renders standard prices
+ * unconditionally (`src/lib/premium-sheet/pricing.ts`) and a launch-pricing rollout must
+ * never charge a different amount than the sheet showed. The two pre-existing values keep
+ * the flag-aware resolver, so every legacy flow is unchanged.
+ */
+export type CheckoutRequestSource = "pricing_page" | "quiz_result_offer" | "premium_sheet"
+
 export const StripeCheckoutSessionRequestSchema = z
   .object({
     interval: z.enum(["month", "quarter", "year"]).optional(),
@@ -69,7 +88,7 @@ export const StripeCheckoutSessionRequestSchema = z
     // Accept null too — the client sends `leadId: null` when there's no ?lead=
     // in the URL (resubscribe path). `.optional()` alone rejects null.
     leadId: z.string().uuid().nullable().optional(),
-    source: z.enum(["pricing_page", "quiz_result_offer"]).default("pricing_page"),
+    source: z.enum(["pricing_page", "quiz_result_offer", "premium_sheet"]).default("pricing_page"),
     funnelEventId: z.string().uuid().optional(),
     checkoutAttemptId: z.string().uuid().optional(),
     checkoutSessionAttemptId: z.string().uuid().optional(),
@@ -80,6 +99,12 @@ export const StripeCheckoutSessionRequestSchema = z
     preparationId: z.string().uuid().optional(),
     preparationToken: z.string().min(32).max(256).optional(),
     preparedSessionId: z.string().startsWith("cs_").optional(),
+    /**
+     * T14, `source: "premium_sheet"` only: the app surface the sheet was opened from, so a
+     * redirect-based payment method returns THERE instead of `/welcome`. Untrusted —
+     * `sanitizeFreemiumCheckoutReturnPath` reduces it to an allowlisted app path.
+     */
+    returnPath: z.string().max(200).optional(),
   })
   .strict()
   .superRefine(
@@ -99,10 +124,43 @@ export const StripeCheckoutSessionRequestSchema = z
         presentation,
         purchaseKind,
         returnDestination,
+        returnPath,
         source,
       },
       context,
     ) => {
+      // T14: the Premium sheet sells exactly one thing — a standard-catalog subscription,
+      // created in one step for an already-authenticated free user. Every other protocol
+      // this endpoint speaks (one-time product, lead/funnel offer contract, prepared/claim,
+      // reactivation, Elements presentation) is refused here rather than silently ignored,
+      // so the new source can never reach a legacy branch.
+      if (source === "premium_sheet") {
+        if (
+          purchaseKind ||
+          presentation ||
+          action !== "create" ||
+          leadId ||
+          funnelSessionId ||
+          preparationId ||
+          preparationToken ||
+          preparedSessionId ||
+          checkoutSessionAttemptId ||
+          checkoutContext ||
+          returnDestination
+        ) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "invalid Premium-sheet checkout contract",
+            path: ["source"],
+          })
+        }
+      } else if (returnPath !== undefined) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "returnPath is limited to Premium-sheet checkout",
+          path: ["returnPath"],
+        })
+      }
       if (purchaseKind === PERSONAL_PLAN_ONCE_KIND) {
         if (interval !== undefined) {
           context.addIssue({
@@ -315,6 +373,28 @@ export function reportMissingExactOfferFunnelContext(
   return true
 }
 
+/**
+ * Which price catalog a checkout SUBMITS (freemium-scanner-first T14, carry-forward from
+ * T13).
+ *
+ * The Premium sheet renders standard prices unconditionally
+ * (`src/lib/premium-sheet/pricing.ts`), so the price it charges is pinned to the same
+ * catalog here — a launch-pricing rollout must never charge 69,99 behind a 99,99 sheet.
+ * Every other source keeps the flag-aware resolver exactly as before.
+ *
+ * Exported because this is the one assertion worth making in both flag states.
+ */
+export function resolveCheckoutPricingCatalog({
+  source,
+  launchPricingEnabled,
+}: {
+  source: CheckoutRequestSource
+  launchPricingEnabled: boolean
+}): SubscriptionPricingCatalog {
+  if (source === "premium_sheet") return STANDARD_PRICING_CATALOG
+  return resolveSubscriptionPricingCatalog(launchPricingEnabled)
+}
+
 export function resolveStripeCheckoutSessionCreateOptions({
   reactivationReservationId,
   isPreparation,
@@ -328,7 +408,7 @@ export function resolveStripeCheckoutSessionCreateOptions({
   isPreparation: boolean
   preparationId?: string
   isOneTimePurchase: boolean
-  source: "pricing_page" | "quiz_result_offer"
+  source: CheckoutRequestSource
   checkoutAttemptId?: string
   checkoutSessionAttemptId?: string
 }) {
@@ -347,6 +427,11 @@ export function resolveStripeCheckoutSessionCreateOptions({
         checkoutSessionAttemptId ?? checkoutAttemptId,
       ),
     }
+  }
+  // T14: a re-mounted sheet (React strict mode, a retry after a network blip) must recover
+  // the SAME Session rather than leave a trail of open ones behind the same CTA press.
+  if (source === "premium_sheet" && checkoutAttemptId) {
+    return { idempotencyKey: `premium-sheet:${checkoutAttemptId}` }
   }
   return undefined
 }
@@ -408,11 +493,18 @@ export async function POST(req: NextRequest) {
     preparationToken,
     preparedSessionId,
     returnDestination: rawReturnDestination,
+    returnPath: rawReturnPath,
     presentation,
   } = parsed.data
   const isOneTimePurchase = purchaseKind === PERSONAL_PLAN_ONCE_KIND
+  const isPremiumSheetCheckout = source === "premium_sheet"
   if (presentation === "offer_overlay_elements" && !isOfferElementsCheckoutEnabled()) {
     return NextResponse.json({ error: "bad request" }, { status: 400 })
+  }
+  // Flag-off byte-identity: with the freemium restructure disabled this source does not
+  // exist at all, exactly as before T14.
+  if (isPremiumSheetCheckout && !isFreemiumScannerFirstEnabled()) {
+    return NextResponse.json({ error: "not found" }, { status: 404 })
   }
   const isPreparation = action === "prepare"
   const subscriptionInterval = interval as BillingInterval
@@ -597,6 +689,13 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // The sheet is only ever opened by a signed-in free user; there is no anonymous
+    // Premium-sheet purchase to recover, and the completion contract binds the Session to
+    // this exact user id.
+    if (isPremiumSheetCheckout && !authenticatedUserId) {
+      return NextResponse.json({ error: "authentication required" }, { status: 401 })
+    }
+
     if (authenticatedUserId) {
       const adminSupabase = getAdminSupabase()
       const conflictResponse = await createStripeCheckoutAccessConflictResponse(
@@ -755,7 +854,10 @@ export async function POST(req: NextRequest) {
     const leadFunnelContext = resolvedLeadId
       ? await resolveFunnelContextForLead(resolvedLeadId, exactOfferFunnelSessionId)
       : null
-    const pricingCatalog = resolveSubscriptionPricingCatalog(isPersonalPlanLaunchPricingEnabled())
+    const pricingCatalog = resolveCheckoutPricingCatalog({
+      source,
+      launchPricingEnabled: isPersonalPlanLaunchPricingEnabled(),
+    })
     const analyticsPlan = isOneTimePurchase
       ? PERSONAL_PLAN_ONCE_PRODUCT
       : getStripePricingPlan(subscriptionInterval, pricingCatalog)
@@ -816,7 +918,11 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "reactivation_checkout_unavailable" }, { status: 409 })
       }
     }
-    const shouldRecordCheckoutFunnel = shouldRecordFunnelForCheckoutAction(action)
+    // The Premium sheet is not a funnel surface: there is no lead, no quiz session and no
+    // offer touch to attribute, and recording a `checkout_started` milestone against a
+    // stray cookie context would attach an in-app upgrade to somebody's old quiz funnel.
+    const shouldRecordCheckoutFunnel =
+      shouldRecordFunnelForCheckoutAction(action) && !isPremiumSheetCheckout
     const cookieFunnelContext = shouldRecordCheckoutFunnel
       ? await resolveFunnelCookieContext(cookieStore.get(FUNNEL_SESSION_COOKIE)?.value)
       : null
@@ -877,6 +983,12 @@ export async function POST(req: NextRequest) {
       returnDestination: reactivationReservation?.return_destination,
       reactivationReservationId: reactivationReservation?.id,
       presentation: presentation === "offer_overlay_elements" ? "elements" : "embedded_page",
+      ...(isPremiumSheetCheckout
+        ? {
+            completion: "contextual" as const,
+            contextualReturnUrl: buildFreemiumCheckoutReturnUrl(origin, rawReturnPath),
+          }
+        : {}),
       ...(!isPreparation &&
       (checkoutAttemptId ||
         oneTimeConsentId ||
@@ -888,6 +1000,12 @@ export async function POST(req: NextRequest) {
               ...(oneTimeConsentId ? { personal_plan_once_consent_id: oneTimeConsentId } : {}),
               ...(!isOneTimePurchase
                 ? { pricing_catalog: pricingCatalog, stripe_price_id: priceId }
+                : {}),
+              ...(isPremiumSheetCheckout
+                ? {
+                    [FREEMIUM_CHECKOUT_MARKER_KEY]: FREEMIUM_CHECKOUT_MARKER_VALUE,
+                    [FREEMIUM_CHECKOUT_USER_KEY]: authenticatedUserId!,
+                  }
                 : {}),
               ...(checkoutIsInternalTest !== undefined
                 ? { is_internal_test: String(checkoutIsInternalTest) }
@@ -981,7 +1099,13 @@ export async function POST(req: NextRequest) {
           })
       : false
 
-    const response = NextResponse.json({ client_secret: session.client_secret })
+    const response = NextResponse.json({
+      client_secret: session.client_secret,
+      // T14 only: Stripe's embedded `onComplete` callback carries no Session id, and the
+      // sheet needs one to ask the server what actually happened. Added for the new source
+      // alone so every existing client's response body stays byte-identical.
+      ...(isPremiumSheetCheckout ? { session_id: session.id } : {}),
+    })
     if (funnelTouch && funnelRecorded) {
       response.cookies.set(FUNNEL_TOUCH_COOKIE, "", { path: "/", maxAge: 0 })
     }
@@ -1046,7 +1170,7 @@ type StripeCheckoutInitializationFailure = {
   commerceKind: "subscription" | "one_time"
   isInternalTest: boolean
   leadId?: string | null
-  source: "pricing_page" | "quiz_result_offer"
+  source: CheckoutRequestSource
 }
 
 type StripeCheckoutInitializationTelemetry = {
@@ -1124,7 +1248,7 @@ export async function reportPreparedCheckoutControlOutcome(
     isInternalTest: boolean
     leadId?: string | null
     checkoutAttemptId?: string | null
-    source: "pricing_page" | "quiz_result_offer"
+    source: CheckoutRequestSource
   },
   telemetry: PreparedCheckoutControlOutcomeTelemetry = {
     capture: captureServerPaymentFailure,
@@ -1183,7 +1307,7 @@ async function preparedCheckoutUnavailable(input: {
   isInternalTest: boolean
   leadId?: string | null
   checkoutAttemptId?: string | null
-  source: "pricing_page" | "quiz_result_offer"
+  source: CheckoutRequestSource
 }) {
   // Clients deliberately receive one outcome for identity, expiry, and token failures.
   // Detailed causes are safe to add to server-only diagnostics without becoming an oracle.
@@ -1197,7 +1321,7 @@ async function preparedCheckoutProviderLocked(
     isInternalTest: boolean
     leadId?: string | null
     checkoutAttemptId?: string | null
-    source: "pricing_page" | "quiz_result_offer"
+    source: CheckoutRequestSource
   },
   provider: "paypal" | "stripe",
 ) {
@@ -1230,7 +1354,7 @@ function buildPreparedCheckoutMetadata(input: {
   interval: CheckoutCommerceInterval
   priceId: string
   pricingCatalog?: SubscriptionPricingCatalog
-  source: "pricing_page" | "quiz_result_offer"
+  source: CheckoutRequestSource
   presentation?: "offer_overlay_elements"
   identityHash: string
 }) {
@@ -1264,7 +1388,7 @@ export function validatePreparedCheckoutClaim(input: {
   preparationToken: string
   interval: CheckoutCommerceInterval
   priceId: string
-  source: "pricing_page" | "quiz_result_offer"
+  source: CheckoutRequestSource
   presentation?: "offer_overlay_elements"
   identityHash: string
   checkoutAttemptId: string
@@ -1435,7 +1559,7 @@ export function validatePreparedCheckoutCanonicalMetadataRepair(input: {
   preparationToken: string
   interval: CheckoutCommerceInterval
   priceId: string
-  source: "pricing_page" | "quiz_result_offer"
+  source: CheckoutRequestSource
   presentation?: "offer_overlay_elements"
   identityHash: string
   checkoutAttemptId: string
@@ -1552,7 +1676,7 @@ async function claimPreparedCheckoutSession(input: {
   stripe: Stripe
   requestedInterval: CheckoutCommerceInterval
   isOneTimePurchase: boolean
-  source: "pricing_page" | "quiz_result_offer"
+  source: CheckoutRequestSource
   presentation?: "offer_overlay_elements"
   leadId: string | null
   userId?: string
@@ -1875,7 +1999,7 @@ async function repairCanonicalOneTimeClaimMetadata(input: {
 
 async function recordPreparedCheckoutStarted(input: {
   interval: CheckoutCommerceInterval
-  source: "pricing_page" | "quiz_result_offer"
+  source: CheckoutRequestSource
   leadId: string | null
   userId?: string
   checkoutAttemptId: string

@@ -87,6 +87,9 @@ const PROTECTED_ROUTE_PREFIXES = [
   "/api/chat",
   "/api/customerio",
   "/api/feedback",
+  // freemium-scanner-first T14: contextual purchase completion. Authenticated by
+  // definition — it verifies and admits the CALLER's own purchase.
+  "/api/freemium",
   "/api/memory",
   "/api/personal-plan",
   "/api/product-intake",

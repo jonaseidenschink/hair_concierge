@@ -12,6 +12,10 @@ import {
   subPeriodEndIso,
 } from "./checkout-activation"
 import { intervalFromPrice } from "./intervals"
+import { isFreemiumScannerFirstEnabled } from "@/lib/entitlements/flag"
+import { freemiumCheckoutUserId, isFreemiumCheckoutSession } from "@/lib/freemium/checkout-metadata"
+import type { FreemiumProvisioningResult } from "@/lib/freemium/plan-provisioning"
+import { captureCheckoutException } from "@/lib/observability/checkout"
 import {
   findBillingSubscriptionByProviderId,
   upsertBillingSubscription,
@@ -114,6 +118,243 @@ async function selectedSubscriptionPaymentMethodType(
   // Fallback only when Checkout offered a single method. `payment_method_types`
   // is an offered-method list, not proof of the method used.
   return session.payment_method_types?.length === 1 ? session.payment_method_types[0] : undefined
+}
+
+/**
+ * What the webhook lane must do next with a freemium provisioning attempt.
+ *
+ * `retryable` is the load-bearing one (Codex fix wave, Y1). It is the caller's instruction
+ * to FAIL the webhook delivery — release the event claim and answer Stripe with a 500 — so
+ * the event is redelivered. Swallowing the failure here, which is what this function used
+ * to do, left a verified-paid buyer permanently unprovisioned: the claim row was already
+ * written, so no later delivery of the same event could ever be processed, and a buyer who
+ * had closed the tab had no client lane left either.
+ */
+export type FreemiumWebhookProvisioningOutcome =
+  /** Not a freemium checkout (or the flag is off) — nothing was attempted. */
+  | { status: "skipped" }
+  /** Admitted, pinned, derived and the Routine is active. Nothing left to do. */
+  | { status: "provisioned" }
+  /** Transient: the caller must make Stripe redeliver this event. */
+  | { status: "retryable"; reason: string }
+  /** A retry cannot help (no quiz artifact, foreign enrollment, identity mismatch). */
+  | { status: "blocked"; reason: string }
+
+/**
+ * Freemium (Premium-sheet) post-purchase provisioning, run from the webhook lane
+ * (freemium-scanner-first T14).
+ *
+ * The in-sheet completion callback already does this for a card payment that finishes while
+ * the buyer is watching. This lane covers everything else: an asynchronous payment method
+ * that settles minutes later, a buyer who closed the tab mid-payment, a failed completion
+ * call. Both lanes run the SAME idempotent service, so whichever arrives first provisions
+ * and the other one is a no-op.
+ *
+ * Inert unless the Session carries this program's marker, so no other checkout is affected.
+ */
+export async function provisionFreemiumCheckoutSession(
+  session: Stripe.Checkout.Session,
+  deps: Pick<
+    StripeWebhookProvisioningDeps,
+    "provisionFreemiumPurchase" | "freemiumEnabled" | "captureFreemiumProvisioningException"
+  >,
+  /**
+   * The account the ACTIVATION resolved (by Stripe customer / email), which is independent
+   * of the Session metadata. Fix round 1 (F7): the completion endpoint already refuses when
+   * the two identities disagree; this lane must too, because the plan's
+   * `enrollment_purchase_source_id` pin is permanent and never self-heals — pinning the
+   * wrong account's plan cannot be undone afterwards.
+   */
+  activation: { userId: string },
+): Promise<FreemiumWebhookProvisioningOutcome> {
+  const userId = freemiumCheckoutProvisioningUserId(session, deps)
+  if (!userId) return { status: "skipped" }
+  const capture = deps.captureFreemiumProvisioningException ?? captureCheckoutException
+  if (userId !== activation.userId) {
+    console.error("[freemium] webhook provisioning identity mismatch", {
+      checkoutSessionId: session.id,
+    })
+    capture(new Error("freemium webhook provisioning identity mismatch"), {
+      provider: "stripe",
+      stage: "stripe_webhook_activation",
+      source: "premium_sheet",
+      stripeSessionId: session.id,
+      reason: "freemium_webhook_identity_mismatch",
+    })
+    // Redelivering cannot change which account the activation resolves to.
+    return { status: "blocked", reason: "identity_mismatch" }
+  }
+
+  const provision = deps.provisionFreemiumPurchase ?? defaultProvisionFreemiumPurchase
+  let result: FreemiumProvisioningResult
+  try {
+    result = await provision({ userId, providerReference: session.id })
+  } catch (error) {
+    // The provisioning service marks nothing "done" until it is done — admission is a
+    // reused row, the initial need reuses its `(plan, input_hash)` row and acceptance is
+    // CAS-guarded — so an interrupted run is safe to run again from the top.
+    console.error("[freemium] webhook provisioning failed", {
+      checkoutSessionId: session.id,
+      error,
+    })
+    capture(error, {
+      provider: "stripe",
+      stage: "stripe_webhook_activation",
+      source: "premium_sheet",
+      stripeSessionId: session.id,
+      reason: "freemium_webhook_provisioning_failed",
+    })
+    return { status: "retryable", reason: "provisioning_error" }
+  }
+
+  if (result.outcome === "provisioned" && result.routineAccepted) return { status: "provisioned" }
+
+  // A plan that is admitted, pinned and derived but has no ACTIVE routine version does not
+  // satisfy `resolvePersonalPlanJourneyAccess` — the buyer paid and still sees a gate. That
+  // is a retry, not a success.
+  const reason =
+    result.outcome === "provisioned"
+      ? "routine_not_accepted"
+      : result.outcome === "temporarily_unavailable"
+        ? `unavailable_${result.stage}`
+        : result.outcome === "enrollment_conflict"
+          ? (result.reasonCode ?? "enrollment_conflict")
+          : result.outcome
+  const retryable = result.outcome === "provisioned" || result.outcome === "temporarily_unavailable"
+
+  console.error("[freemium] webhook provisioning incomplete", {
+    checkoutSessionId: session.id,
+    outcome: result.outcome,
+    reason,
+    retryable,
+  })
+  capture(new Error(`freemium webhook provisioning incomplete: ${reason}`), {
+    provider: "stripe",
+    stage: "stripe_webhook_activation",
+    source: "premium_sheet",
+    stripeSessionId: session.id,
+    reason: retryable
+      ? "freemium_webhook_provisioning_incomplete"
+      : "freemium_webhook_provisioning_blocked",
+  })
+  return retryable ? { status: "retryable", reason } : { status: "blocked", reason }
+}
+
+/**
+ * Thrown by `runFreemiumCheckoutProvisioning` when the delivery must be failed so Stripe
+ * redelivers it. The webhook route's own catch is what turns this into the durable retry:
+ * it releases the event claim and answers 500.
+ */
+export class FreemiumWebhookProvisioningRetryError extends Error {
+  readonly checkoutSessionId: string | undefined
+  readonly reason: string
+
+  constructor(checkoutSessionId: string | undefined, reason: string) {
+    super(`freemium provisioning must be retried (${reason})`)
+    this.name = "FreemiumWebhookProvisioningRetryError"
+    this.checkoutSessionId = checkoutSessionId
+    this.reason = reason
+  }
+}
+
+/**
+ * How long the webhook will wait for provisioning before failing the delivery instead.
+ *
+ * Comfortably inside Stripe's own ~30s delivery timeout, and that gap is the point: if the
+ * chain outran Stripe's timeout, the platform would kill the invocation with the event
+ * still claimed — the redelivery would then be dropped as a duplicate and the buyer would
+ * be stuck for good. Giving up first keeps the failure inside our own hands, where the
+ * claim gets released. Every provisioning step is reuse-based, so the abandoned run costs
+ * nothing: the retry resumes from wherever it got to.
+ */
+export const FREEMIUM_WEBHOOK_PROVISIONING_BUDGET_MS = 20_000
+
+/**
+ * Run the freemium provisioning for a verified-paid webhook event, and THROW when Stripe
+ * has to try again (Codex fix wave, Y1).
+ *
+ * This is awaited inside the webhook's response, not deferred. Deferred work runs after the
+ * response has been sent, which makes its failure unreportable to Stripe — and with the
+ * event already claimed, unreachable by any redelivery. A buyer who closed the tab had no
+ * other lane left. Bounded by `FREEMIUM_WEBHOOK_PROVISIONING_BUDGET_MS`.
+ */
+export async function runFreemiumCheckoutProvisioning(
+  session: Stripe.Checkout.Session,
+  deps: Pick<
+    StripeWebhookProvisioningDeps,
+    "provisionFreemiumPurchase" | "freemiumEnabled" | "captureFreemiumProvisioningException"
+  >,
+  activation: { userId: string },
+  options: { budgetMs?: number } = {},
+): Promise<FreemiumWebhookProvisioningOutcome> {
+  const budgetMs = options.budgetMs ?? FREEMIUM_WEBHOOK_PROVISIONING_BUDGET_MS
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const outcome = await Promise.race([
+    provisionFreemiumCheckoutSession(session, deps, activation).catch(
+      (): FreemiumWebhookProvisioningOutcome => ({
+        status: "retryable",
+        reason: "provisioning_error",
+      }),
+    ),
+    new Promise<FreemiumWebhookProvisioningOutcome>((resolve) => {
+      timer = setTimeout(
+        () => resolve({ status: "retryable", reason: "provisioning_budget_exhausted" }),
+        budgetMs,
+      )
+    }),
+  ])
+  if (timer) clearTimeout(timer)
+  if (outcome.status === "retryable") {
+    throw new FreemiumWebhookProvisioningRetryError(session.id, outcome.reason)
+  }
+  return outcome
+}
+
+/**
+ * The synchronous half of the guard above, so the webhook can decide whether there is any
+ * freemium work at all BEFORE doing anything. Every non-freemium checkout must leave the
+ * deferred-work queue exactly as it was pre-T14.
+ */
+export function freemiumCheckoutProvisioningUserId(
+  session: Stripe.Checkout.Session,
+  deps: Pick<StripeWebhookProvisioningDeps, "freemiumEnabled">,
+): string | null {
+  const enabled = deps.freemiumEnabled ?? isFreemiumScannerFirstEnabled
+  if (!enabled()) return null
+  if (!isFreemiumCheckoutSession(session)) return null
+  return freemiumCheckoutUserId(session)
+}
+
+export type StripeWebhookProvisioningDeps = {
+  freemiumEnabled?: () => boolean
+  provisionFreemiumPurchase?: (input: {
+    userId: string
+    providerReference: string
+  }) => Promise<FreemiumProvisioningResult>
+  /** Test seam for the failure report above; production uses `captureCheckoutException`. */
+  captureFreemiumProvisioningException?: typeof captureCheckoutException
+}
+
+async function defaultProvisionFreemiumPurchase(input: {
+  userId: string
+  providerReference: string
+}): Promise<FreemiumProvisioningResult> {
+  const [
+    { createFreemiumProvisioningService },
+    { createFreemiumProvisioningSupabaseDependencies },
+    { createAdminClient },
+  ] = await Promise.all([
+    import("@/lib/freemium/plan-provisioning"),
+    import("@/lib/freemium/plan-provisioning-supabase"),
+    import("@/lib/supabase/admin"),
+  ])
+  return createFreemiumProvisioningService(
+    createFreemiumProvisioningSupabaseDependencies(createAdminClient() as never),
+  ).provisionAfterPurchase({
+    userId: input.userId,
+    provider: "stripe",
+    providerReference: input.providerReference,
+  })
 }
 
 export async function handleCheckoutSessionCompleted(

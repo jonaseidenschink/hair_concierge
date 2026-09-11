@@ -595,6 +595,30 @@ export function ScanFlow({
     [resolve],
   )
 
+  /**
+   * Fix round 2: `tier_upgraded`'s reducer case deliberately leaves `step`/`result`
+   * untouched (see its doc comment and the reducer test) — a purchase proves the tier,
+   * it does not hand back a new verdict. But when the step on screen at that moment is a
+   * MASKED `in_catalog` verdict, that original masked payload (blurred comparison table,
+   * inert "Was passt stattdessen?" CTA) is now stale: the buyer just paid specifically to
+   * see the alternatives it hides. `resolve({ productId })` re-fetches the SAME product
+   * through the ordinary tokened machinery (`openFromProductId` above uses the exact same
+   * call) — now that the server has verified the purchase, that response comes back
+   * unmasked. `PremiumSheet`'s `onUnlocked` fires at most once (ref-guarded upstream), so
+   * this cannot loop; the brief "resolving" skeleton it repaints through is the same
+   * flicker any rescan already has. Every other step (`unknown`/`pending`, or premium
+   * already, or no result yet) has nothing masked to fix, so nothing re-resolves.
+   */
+  const handleTierUpgraded = useCallback(() => {
+    const current = stateRef.current.step
+    const productId =
+      current.kind === "result" && isMaskedScanVerdict(current.result)
+        ? current.result.product.productId
+        : null
+    dispatch({ type: "tier_upgraded" })
+    if (productId !== null) void resolve({ productId })
+  }, [resolve])
+
   const submitUnknown = useCallback(
     async (input: ScanSubmissionInput, identifier: ScanIdentifier) => {
       const token = requests.begin()
@@ -909,6 +933,17 @@ export function ScanFlow({
         open={state.premiumSheet !== null}
         context={state.premiumSheet}
         onClose={() => dispatch({ type: "premium_sheet_closed" })}
+        // Fix round 1 (F1): the sheet's `router.refresh()` re-serves this component's
+        // server props but cannot touch its reducer, and `state.tier` is sticky by design.
+        // Without this the buyer returns from the purchase to a still-locked Merken
+        // bookmark — the gate most of them started from.
+        onUnlocked={handleTierUpgraded}
+        // Fix round 1 (F2): a redirect payment (PayPal) returns on a fresh page load with
+        // no sheet open, so a pending or failed outcome has nowhere to render. Reopen on
+        // the gate the purchase started from; Merken is this surface's default origin.
+        onRequestOpen={(context) =>
+          dispatch({ type: "premium_sheet_opened", context: context ?? MERKLISTE_GATE })
+        }
       />
     </div>
   )

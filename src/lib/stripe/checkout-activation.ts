@@ -183,7 +183,15 @@ export type StripeOneTimeRecoveryVerification = {
   }
 }
 
-export async function verifyCheckoutSessionForActivation(
+/**
+ * The retrieve half of `verifyCheckoutSessionForActivation`, with none of its assertions.
+ *
+ * Split out for callers that must decide something about the Session BEFORE its payment
+ * state is classified — the Premium sheet's completion endpoint checks ownership first, so
+ * a caller who supplies somebody else's Session id learns nothing about it
+ * (freemium-scanner-first T14, fix round 1 F6).
+ */
+export async function retrieveCheckoutSessionForActivation(
   sessionId: string,
   stripe?: Stripe,
 ): Promise<Stripe.Checkout.Session> {
@@ -195,11 +203,17 @@ export async function verifyCheckoutSessionForActivation(
   }
 
   const stripeClient = stripe ?? (await import("./client")).getStripe()
-  const session = await measureCheckoutStep("stripe.checkout.sessions.retrieve", () =>
+  return measureCheckoutStep("stripe.checkout.sessions.retrieve", () =>
     stripeClient.checkout.sessions.retrieve(sessionId, {
       expand: ["line_items.data.price", "payment_intent.latest_charge"],
     }),
   )
+}
+
+/** The assertion half: throws `CheckoutActivationError` for a Session that cannot activate. */
+export function assertCheckoutSessionActivatable(
+  session: Stripe.Checkout.Session,
+): Stripe.Checkout.Session {
   if (session.metadata?.product_kind === PERSONAL_PLAN_ONCE_KIND) {
     assertOneTimeCheckoutSession(session as OneTimeSession)
     return session
@@ -208,6 +222,15 @@ export async function verifyCheckoutSessionForActivation(
   assertCheckoutPaymentAuthorized(session)
   assertCheckoutPreparationClaimed(session)
   return session
+}
+
+export async function verifyCheckoutSessionForActivation(
+  sessionId: string,
+  stripe?: Stripe,
+): Promise<Stripe.Checkout.Session> {
+  return assertCheckoutSessionActivatable(
+    await retrieveCheckoutSessionForActivation(sessionId, stripe),
+  )
 }
 
 export async function ensureCheckoutAccount(

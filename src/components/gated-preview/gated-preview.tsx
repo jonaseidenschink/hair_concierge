@@ -100,6 +100,10 @@ export function GatedPreview({
         open={sheetOpen}
         context={{ feature, source }}
         onClose={() => setSheetOpen(false)}
+        // A redirect payment (PayPal) returns on a fresh page load with the sheet closed;
+        // pending and failed outcomes must be visible (T14 fix round 1, F2). This page's
+        // own context is the right one either way, so the remembered one is ignored.
+        onRequestOpen={() => setSheetOpen(true)}
       />
     </section>
   )

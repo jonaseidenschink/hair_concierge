@@ -15,6 +15,23 @@ type BuildStripeCheckoutSessionParamsInput = {
   reactivationReservationId?: string | null
   expiresAt?: number
   metadata?: Record<string, string>
+  /**
+   * Where Checkout hands the buyer back (freemium-scanner-first T14).
+   *
+   * - `"welcome"` (default, every pre-T14 caller): today's behaviour, byte for byte —
+   *   `return_url` = `/welcome?session_id=…` with Stripe's default
+   *   `redirect_on_completion: "always"` (left implicit, so the created params object is
+   *   unchanged for those callers).
+   * - `"contextual"`: the Premium sheet's in-place completion. `redirect_on_completion:
+   *   "if_required"` keeps a card/wallet payment INSIDE the sheet (Stripe fires the
+   *   embedded `onComplete` callback instead of navigating) while still allowing the
+   *   redirect-based methods — PayPal above all — that `"never"` would silently remove
+   *   from the payment-method list. Those methods come back to `contextualReturnUrl`,
+   *   which is the ORIGINATING app surface, never `/welcome`.
+   */
+  completion?: "welcome" | "contextual"
+  /** Required with `completion: "contextual"` — already-sanitized, origin-absolute. */
+  contextualReturnUrl?: string
 }
 
 export function buildStripeCheckoutSessionParams({
@@ -32,9 +49,15 @@ export function buildStripeCheckoutSessionParams({
   reactivationReservationId,
   expiresAt,
   metadata: extraMetadata,
+  completion = "welcome",
+  contextualReturnUrl,
 }: BuildStripeCheckoutSessionParamsInput): Stripe.Checkout.SessionCreateParams {
   const isElementsPresentation = presentation === "elements"
   const isOneTimePurchase = checkoutKind === "personal_plan_once"
+  const isContextualCompletion = completion === "contextual"
+  if (isContextualCompletion && !contextualReturnUrl) {
+    throw new Error("contextual checkout completion requires a return url")
+  }
 
   return {
     mode: isOneTimePurchase ? "payment" : "subscription",
@@ -44,7 +67,12 @@ export function buildStripeCheckoutSessionParams({
     ...(customerId ? { customer: customerId } : { customer_email: customerEmail }),
     // One-time purchases need a Customer even when Checkout starts with only an email.
     ...(isOneTimePurchase && !customerId ? { customer_creation: "always" } : {}),
-    return_url: `${origin}/welcome?session_id={CHECKOUT_SESSION_ID}`,
+    ...(isContextualCompletion
+      ? {
+          redirect_on_completion: "if_required" as const,
+          return_url: contextualReturnUrl!,
+        }
+      : { return_url: `${origin}/welcome?session_id={CHECKOUT_SESSION_ID}` }),
     ...(expiresAt ? { expires_at: expiresAt } : {}),
     automatic_tax: { enabled: true },
     ...(isOneTimePurchase
