@@ -3,14 +3,14 @@ import { Suspense } from "react"
 import { ChatContainer } from "@/components/chat/chat-container"
 import { GatedChatExample } from "@/components/gated-preview/gated-chat-example"
 import { isFreemiumScannerFirstEnabled } from "@/lib/entitlements/flag"
-import { shouldRenderGatedExample } from "@/lib/gated-preview/gate"
+import { resolveGatedPageMode } from "@/lib/gated-preview/gate"
 
 export const dynamic = "force-dynamic"
 
 // T12 (freemium-scanner-first PR3): the free tier gets the framed „Beispiel" chat — a
 // scripted, capability-true transcript — instead of a live `useChat` session it is not
 // entitled to. Premium and flag-off render exactly today's page: the same
-// `<ChatContainer />` (`shouldRenderGatedExample` fails closed to premium).
+// `<ChatContainer />` (`resolveGatedPageMode` fails closed to premium).
 //
 // Pre-boundary fix wave (F3): the suspected bundle bloat did NOT reproduce. Verified with
 // two full production builds plus a live browser network capture on this exact route: a
@@ -21,22 +21,29 @@ export const dynamic = "force-dynamic"
 // ships on this route via a chunk shared for unrelated reasons, so gating the import moves
 // nothing. Kept static rather than adding an import boundary for a saving that does not
 // exist.
+//
+// T17 widens the branch from two states to three: `"example"` is the never-paid free
+// tier (unchanged), `"keepsake"` is a LAPSED owner whose own conversation history stays
+// readable with the composer locked to the Premium sheet, and `"premium"` is today's
+// page verbatim.
 async function ChatTierSegment() {
-  if (await shouldRenderGatedExample()) return <GatedChatExample />
+  const mode = await resolveGatedPageMode()
+  if (mode === "example") return <GatedChatExample />
+  if (mode === "keepsake") return <ChatContainer keepsake />
   return <ChatContainer />
 }
 
 export default function ChatPage() {
   // PR3 Codex fix (X2): flag off must stay the literal pre-branch page — no tier call, no
   // Suspense wrapper. This is a plain (non-async) return, so it resolves synchronously and
-  // stays byte-identical to today's render; `shouldRenderGatedExample` is never even called
+  // stays byte-identical to today's render; `resolveGatedPageMode` is never even called
   // in this state.
   if (!isFreemiumScannerFirstEnabled()) return <ChatContainer />
 
   // PR3 Codex fix (X2, controller ruling): unlike `/routine` and `/anwendung`, this page has
   // no server-side data load of its own to run the tier check alongside — `ChatContainer`
   // fetches its conversation list client-side, so there is nothing here to `Promise.all` the
-  // tier check against. Serializing `await shouldRenderGatedExample()` ahead of the return
+  // tier check against. Serializing `await resolveGatedPageMode()` ahead of the return
   // therefore added pure latency (one `auth.getUser()` plus the paid-access composite) in
   // front of every premium render, with base (pre-T12) rendering `<ChatContainer />`
   // immediately.

@@ -5,7 +5,10 @@ import { useChat } from "@/hooks/use-chat"
 import { useHairProfile } from "@/hooks/use-hair-profile"
 import { generateSuggestedPrompts } from "@/lib/suggested-prompts"
 import { ChatInput } from "./chat-input"
+import { ChatKeepsakeComposer } from "./chat-keepsake-composer"
 import { ChatMessage } from "./chat-message"
+import { PremiumSheet } from "@/components/premium-sheet/premium-sheet"
+import type { PremiumSheetContext } from "@/lib/premium-sheet/context"
 import { ChatLoadingIndicator } from "./chat-loading-indicator"
 import { ProductDetailDrawer } from "./product-detail-drawer"
 import { ConversationSidebar } from "./conversation-sidebar"
@@ -29,7 +32,28 @@ const ASSISTANT_TOP_PADDING_PX = 16
 
 type ChatContainerProps = {
   conversationId?: string | null
+  /**
+   * T17 keepsake mode: a LAPSED owner reading their OWN conversation history after their
+   * access ended. The history itself stays readable — middleware admits `GET /api/chat`
+   * and `GET /api/chat/[id]` for them (method-scoped carve-out, see
+   * `FREEMIUM_KEEPSAKE_READ_ROUTE_PREFIXES` in `lib/supabase/middleware.ts`) — while every
+   * write this component can start is replaced by the Premium sheet: the composer, the
+   * starter prompts, "Neue Unterhaltung", conversation delete, message feedback, product
+   * selection, product-intake submission and the drawer's routine action. Their endpoints
+   * all still answer 403 for this user; locking them here is so the user meets a gate
+   * instead of an error.
+   *
+   * Defaults to `false`: premium and flag-off render byte-identically to today.
+   */
+  keepsake?: boolean
 }
+
+/**
+ * T17: the gate a lapsed owner opens from their own chat. Same `{feature, source}` pair
+ * the T12 „Beispiel" chat uses (`GATED_EXAMPLE_COPY.chat`), so the sheet orders its
+ * benefits identically from either surface.
+ */
+const KEEPSAKE_CHAT_GATE = { feature: "chat", source: "gated:chat" } as const
 
 type RoutineProductMembership = {
   category: string | null
@@ -44,6 +68,7 @@ type RoutineMembershipCard = {
 
 export function ChatContainer({
   conversationId: initialConversationId = null,
+  keepsake = false,
 }: ChatContainerProps) {
   const router = useRouter()
   const { profile } = useAuth()
@@ -94,6 +119,18 @@ export function ChatContainer({
   const consumedRoutineSeedConversationRef = useRef<string | null>(null)
   const suppressInitialConversationReloadRef = useRef(false)
   const [showJumpToLatest, setShowJumpToLatest] = useState(false)
+  // T17 keepsake gate. Same opener shape as `GatedPreview`'s and T15's Profil opener.
+  // Never rendered outside keepsake mode.
+  const [premiumSheetOpen, setPremiumSheetOpen] = useState(false)
+  const [premiumSheetContext, setPremiumSheetContext] = useState<PremiumSheetContext | null>(null)
+  const openPremiumSheet = useCallback((context: PremiumSheetContext) => {
+    setPremiumSheetContext(context)
+    setPremiumSheetOpen(true)
+  }, [])
+  const openKeepsakeChatGate = useCallback(
+    () => openPremiumSheet(KEEPSAKE_CHAT_GATE),
+    [openPremiumSheet],
+  )
 
   // Track IDs of messages appended during this session (not from history loads).
   // Uses the "update state during render" pattern recommended by React for
@@ -177,6 +214,11 @@ export function ChatContainer({
   }, [currentConversationId, initialConversationId, loadConversation, messages.length])
 
   useEffect(() => {
+    // Keepsake: this is the one write that does NOT go through `handleSendMessage` — it
+    // dispatches a routine-trigger seed straight to `sendMessage` on mount. A lapsed
+    // owner's `POST /api/chat` is denied, so it would be a guaranteed failed turn; the
+    // seed is left in sessionStorage untouched for whenever they unlock chat again.
+    if (keepsake) return
     const routineSeedConversationId = currentConversationId ?? initialConversationId
     if (!routineSeedConversationId || messages.length > 0 || isStreaming) return
     if (consumedRoutineSeedConversationRef.current === routineSeedConversationId) return
@@ -198,6 +240,7 @@ export function ChatContainer({
     currentConversationId,
     initialConversationId,
     isStreaming,
+    keepsake,
     loadConversation,
     messages.length,
     sendMessage,
@@ -414,10 +457,25 @@ export function ChatContainer({
   )
 
   const handleStartNewConversation = useCallback(() => {
+    if (keepsake) {
+      openKeepsakeChatGate()
+      return
+    }
     suppressInitialConversationReloadRef.current = true
     startNewConversation()
     router.push("/chat")
-  }, [router, startNewConversation])
+  }, [keepsake, openKeepsakeChatGate, router, startNewConversation])
+
+  const handleDeleteConversation = useCallback(
+    (id: string) => {
+      if (keepsake) {
+        openKeepsakeChatGate()
+        return
+      }
+      void deleteConversation(id)
+    },
+    [deleteConversation, keepsake, openKeepsakeChatGate],
+  )
 
   useEffect(() => {
     return () => clearSidebarCloseTimer()
@@ -476,20 +534,26 @@ export function ChatContainer({
     (product: Product) => {
       setDrawerProduct(product)
       setDrawerOpen(true)
-      void loadRoutineProductMembership()
+      // Keepsake: the drawer offers no routine action, so its membership read (403 for a
+      // lapsed user) has nothing to inform — skip it rather than fire and discard it.
+      if (!keepsake) void loadRoutineProductMembership()
     },
-    [loadRoutineProductMembership],
+    [keepsake, loadRoutineProductMembership],
   )
 
   const handleSendMessage = useCallback(
     (message: string) => {
+      if (keepsake) {
+        openKeepsakeChatGate()
+        return
+      }
       userInitiatedTurnRef.current = true
       userOverrideRef.current = false
       assistantTurnAnchoredRef.current = false
       anchoredAssistantIdRef.current = null
       void sendMessage(message)
     },
-    [sendMessage],
+    [keepsake, openKeepsakeChatGate, sendMessage],
   )
 
   const handleScroll = useCallback(() => {
@@ -526,7 +590,7 @@ export function ChatContainer({
           currentId={currentConversationId}
           onSelect={handleSelectConversation}
           onNew={handleStartNewConversation}
-          onDelete={deleteConversation}
+          onDelete={handleDeleteConversation}
         />
       </div>
 
@@ -561,7 +625,7 @@ export function ChatContainer({
               currentId={currentConversationId}
               onSelect={handleSelectConversation}
               onNew={handleStartNewConversation}
-              onDelete={deleteConversation}
+              onDelete={handleDeleteConversation}
               onClose={closeSidebar}
               isMobile
             />
@@ -696,8 +760,19 @@ export function ChatContainer({
                       message={msg}
                       hairProfile={hairProfile}
                       onProductClick={handleProductClick}
-                      onSelectProductCandidate={selectProductCandidate}
-                      onFeedback={submitFeedback}
+                      // Keepsake: every one of these is a write (`POST
+                      // /api/chat/product-selection`, `POST /api/chat/feedback`, the
+                      // product-intake submission). Omitted, `ChatMessage` renders the
+                      // bubble without the affordance rather than with a failing one.
+                      //
+                      // PR5 review fix (Z4): withholding the callbacks was not enough for
+                      // the two interactive CARDS inside a historical message — the
+                      // clarification card called a handler that throws, and both intake
+                      // forms POST `/api/product-intake` (403) on their own. `keepsake` is
+                      // passed explicitly so those render as static history instead.
+                      keepsake={keepsake}
+                      onSelectProductCandidate={keepsake ? undefined : selectProductCandidate}
+                      onFeedback={keepsake ? undefined : submitFeedback}
                       isNew={newMessageIds.has(msg.id)}
                       isStreamingMessage={
                         isStreaming && idx === messages.length - 1 && msg.role === "assistant"
@@ -706,7 +781,7 @@ export function ChatContainer({
                         msg.id,
                       )}
                       productIntakeOfferState={productIntakeOfferStateByMessageId.get(msg.id)}
-                      onProductIntakeSubmitted={applyProductIntakeSubmission}
+                      onProductIntakeSubmitted={keepsake ? undefined : applyProductIntakeSubmission}
                     />
                   </div>
                 )
@@ -739,7 +814,11 @@ export function ChatContainer({
           >
             <ArrowDown className="h-5 w-5" aria-hidden="true" />
           </button>
-          <ChatInput onSend={handleSendMessage} disabled={isStreaming} />
+          {keepsake ? (
+            <ChatKeepsakeComposer onUnlock={openKeepsakeChatGate} />
+          ) : (
+            <ChatInput onSend={handleSendMessage} disabled={isStreaming} />
+          )}
         </div>
       </div>
 
@@ -750,7 +829,7 @@ export function ChatContainer({
         open={drawerOpen}
         onOpenChange={setDrawerOpen}
         routineAction={
-          drawerProduct
+          drawerProduct && !keepsake
             ? {
                 category: drawerProduct.category,
                 productId: drawerProduct.id,
@@ -761,6 +840,20 @@ export function ChatContainer({
             : undefined
         }
       />
+
+      {keepsake ? (
+        <PremiumSheet
+          open={premiumSheetOpen}
+          context={premiumSheetContext}
+          onClose={() => {
+            setPremiumSheetOpen(false)
+            setPremiumSheetContext(null)
+          }}
+          // No `onUnlocked` copy to flip: keepsake mode is a SERVER prop on this page, so
+          // the sheet's own `router.refresh()` after a verified purchase re-resolves it.
+          onRequestOpen={(context) => openPremiumSheet(context ?? KEEPSAKE_CHAT_GATE)}
+        />
+      ) : null}
     </div>
   )
 }

@@ -32,29 +32,67 @@ const ERROR_COPY = "Deine Merkliste lässt sich gerade nicht laden."
  * attribute at all, no `relative` in the class list), matching the same pattern
  * `ScanActionFooter`'s `saveLocked` branch already uses. A free/premium mid-render is never
  * observable to markup as "true"/"false" on the same shape — only as present-or-absent.
+ *
+ * T16 extends the same discipline to `count`: premium's corner badge mirrors free's lock
+ * badge (`ScanLockBadge`) in position and contract, but is its OWN third markup shape, not
+ * a conditional layered onto the plain unlocked button. A falsy `count` (absent, 0 — every
+ * free/flag-off render, and a premium render before the Merkliste count has loaded or while
+ * it is empty) renders the exact pre-T16 unlocked markup: no badge, no `relative`, no
+ * `data-scan-wishlist-count` attribute.
  */
 export function ScanWishlistTrigger({
   onClick,
   locked = false,
+  count,
 }: {
   onClick: () => void
   locked?: boolean
+  /**
+   * T16: a `scan_wishlist` listing count fetched separately (never a client-side guess) —
+   * see `ScanFlow`'s wishlist-count effect. Deep-links (via `onClick`) to the „Gemerkt"
+   * section on the Routine page instead of opening a sheet here.
+   */
+  count?: number
 }) {
-  return locked ? (
-    <button
-      type="button"
-      onClick={onClick}
-      data-scan-wishlist-locked="true"
-      aria-label="Merkliste öffnen — Premium"
-      className="relative flex h-11 w-11 items-center justify-center rounded-full text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-plum)] focus-visible:ring-offset-2"
-    >
-      <Bookmark className="h-5 w-5" aria-hidden="true" />
-      {/* The 44px tap target is much larger than the 20px symbol inside it: without this
-          offset the badge would float in empty space at the button's corner instead of
-          marking the bookmark it belongs to. */}
-      <ScanLockBadge className="right-[7px] top-[7px]" />
-    </button>
-  ) : (
+  if (locked) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        data-scan-wishlist-locked="true"
+        aria-label="Merkliste öffnen — Premium"
+        className="relative flex h-11 w-11 items-center justify-center rounded-full text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-plum)] focus-visible:ring-offset-2"
+      >
+        <Bookmark className="h-5 w-5" aria-hidden="true" />
+        {/* The 44px tap target is much larger than the 20px symbol inside it: without this
+            offset the badge would float in empty space at the button's corner instead of
+            marking the bookmark it belongs to. */}
+        <ScanLockBadge className="right-[7px] top-[7px]" />
+      </button>
+    )
+  }
+
+  if (count) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        data-scan-wishlist-count={count}
+        aria-label={`Merkliste öffnen — ${count} gemerkt`}
+        className="relative flex h-11 w-11 items-center justify-center rounded-full text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-plum)] focus-visible:ring-offset-2"
+      >
+        <Bookmark className="h-5 w-5" aria-hidden="true" />
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute -right-1 -top-1 flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-[var(--brand-plum)] px-1 text-[10px] font-bold leading-none text-white ring-2 ring-background"
+        >
+          {count > 9 ? "9+" : count}
+        </span>
+      </button>
+    )
+  }
+
+  return (
     <button
       type="button"
       onClick={onClick}

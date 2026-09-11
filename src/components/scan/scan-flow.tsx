@@ -164,12 +164,32 @@ export function ScanFlow({
   tier,
   sessionRecordStorage,
   fatigueStorage,
+  merklisteEnabled = false,
+  navigate = (href: string) => {
+    window.location.href = href
+  },
 }: {
   analytics?: ScanAnalyticsPort
   scannerRuntime?: ScannerRuntime
   tier?: EntitlementTier
   sessionRecordStorage?: ScanTriggerStorage
   fatigueStorage?: ScanTriggerStorage
+  /**
+   * T16: the freemium-flag gate for the Merkliste bookmark's count badge + deep-link (and
+   * for the „Gemerkt" section it points at — see `RoutinePage`). A server-derived boolean,
+   * never a client flag read (`isFreemiumScannerFirstEnabled()` is not Edge/browser-safe) —
+   * mirrors how `tier` itself is threaded in. Defaults to `false` so a bare `<ScanFlow />`
+   * (Storybook, this file's own test harness) stays on today's plain bookmark, unchanged.
+   */
+  merklisteEnabled?: boolean
+  /**
+   * DI seam for the premium bookmark's deep-link (`router.push`, supplied by
+   * `ScanPageClient`) — not a bare `useRouter()` call in this component, so this file's
+   * hand-rolled test harness (tests/scan-flow-ui.test.tsx, which does not provide a
+   * `next/navigation` context) never has to fake one. Defaults to a plain location change,
+   * safe for any caller that does not need client-side routing.
+   */
+  navigate?: (href: string) => void
 } = {}) {
   const { toast } = useToast()
   const [state, dispatch] = useReducer(scanFlowReducer, initialScanFlowState)
@@ -235,6 +255,12 @@ export function ScanFlow({
    * mount, regardless of which of its two call sites reaches it first.
    */
   const fatigueHydratedRef = useRef(false)
+  /**
+   * PR5 review fix (Z5): set once `PremiumSheet`'s server-verified `onUnlocked` fires, so
+   * the stable `resolve()` callback stops reading the stale mount-time `tier` prop for
+   * everything that happens AFTER the purchase. Never set from a client-side guess.
+   */
+  const tierUpgradedRef = useRef(false)
 
   const clearSheetTimer = useCallback(() => {
     if (sheetTimerRef.current !== null) window.clearTimeout(sheetTimerRef.current)
@@ -302,6 +328,99 @@ export function ScanFlow({
 
   // Unmount only: never leave a sheet timer pointing at a dead component.
   useEffect(() => clearSheetTimer, [clearSheetTimer])
+
+  /**
+   * T16: the Merkliste bookmark's premium count badge (`ScanWishlistTrigger`'s `count`
+   * prop) — a real `scan_wishlist` listing count, fetched separately, never a client
+   * guess. `null` before the first successful load, and on a load failure the badge simply
+   * stays absent (or keeps its last known value) rather than showing a wrong number.
+   */
+  const [wishlistCount, setWishlistCount] = useState<number | null>(null)
+  /**
+   * PR5 review fix (Z5). The listing and the auto-save race each other: the resolve
+   * route defers its `scan_wishlist` insert through `after()`, so the refetch this
+   * component fires when a resolve settles can (and on a warm connection routinely does)
+   * read the row set from BEFORE that insert and paint a stale count — 0 for the very
+   * product the user just scanned.
+   *
+   * Fixed by counting a UNION instead of a listing length: `confirmedWishlistIdsRef` is
+   * what the last successful listing actually returned, `predictedWishlistIdsRef` holds
+   * products this session has server-side evidence for (`savedState.state === "merkliste"`
+   * on a premium in-catalog resolve — the resolve route predicts exactly that when, and
+   * only when, it scheduled the insert) but that no listing has echoed back yet. A
+   * prediction is dropped the moment a listing contains it, so the union converges on the
+   * server's own truth rather than drifting from it — and no timing guess (a delayed
+   * refetch, a retry loop) is needed anywhere.
+   */
+  const confirmedWishlistIdsRef = useRef<Set<string>>(new Set())
+  const predictedWishlistIdsRef = useRef<Set<string>>(new Set())
+  const wishlistLoadedRef = useRef(false)
+
+  /** Union size of "what the last listing returned" and "what it has not caught up to yet". */
+  const publishWishlistCount = useCallback(() => {
+    if (!wishlistLoadedRef.current) return
+    const union = new Set(confirmedWishlistIdsRef.current)
+    for (const productId of predictedWishlistIdsRef.current) union.add(productId)
+    setWishlistCount(union.size)
+  }, [])
+
+  const loadWishlistCount = useCallback(async () => {
+    try {
+      const response = await fetch("/api/scan/wishlist", { cache: "no-store" })
+      if (!response.ok) return
+      const body = (await response.json()) as { entries?: unknown[] }
+      if (!Array.isArray(body.entries)) return
+      const confirmed = new Set<string>()
+      for (const entry of body.entries) {
+        if (entry && typeof entry === "object" && !Array.isArray(entry)) {
+          const productId = (entry as { productId?: unknown }).productId
+          if (typeof productId === "string") confirmed.add(productId)
+        }
+      }
+      confirmedWishlistIdsRef.current = confirmed
+      // A prediction the listing now carries is no longer a prediction. One it does NOT
+      // carry stays pending: either the deferred insert has not committed yet, or it
+      // failed (a warning-level, best-effort write) — over-counting by one for the rest of
+      // the session is the far smaller lie than dropping the product the user just saved.
+      for (const productId of predictedWishlistIdsRef.current) {
+        if (confirmed.has(productId)) predictedWishlistIdsRef.current.delete(productId)
+      }
+      wishlistLoadedRef.current = true
+      publishWishlistCount()
+    } catch {
+      // Best-effort: the badge simply keeps whatever count (or absence) it already had.
+    }
+  }, [publishWishlistCount])
+
+  /**
+   * The resolve route's own answer about where this product now sits (PR5 review fix Z5).
+   * `"merkliste"` on a premium in-catalog verdict means a row exists or is being inserted
+   * for it right now — server evidence, not a client guess.
+   */
+  const notePredictedWishlistSave = useCallback(
+    (productId: string) => {
+      if (confirmedWishlistIdsRef.current.has(productId)) return
+      predictedWishlistIdsRef.current.add(productId)
+      publishWishlistCount()
+    },
+    [publishWishlistCount],
+  )
+
+  /**
+   * Fires once per mount — only when the flag is on AND the tier is known-not-free. The
+   * server-derived `tier` prop fails closed to "premium" (same as `merkenLocked` below), so
+   * this fires from first paint for a genuinely premium session without waiting for a scan.
+   * Flag-off and a `tier="free"` mount cause zero new network activity, matching this
+   * task's byte-identity / no-new-free-behavior constraints.
+   */
+  useEffect(() => {
+    if (!merklisteEnabled || tier === "free") return
+    void loadWishlistCount()
+    // Fix round 1 (F9): `loadWishlistCount` is a `useCallback` with an empty dependency
+    // array, so it is referentially stable — listing it here changes nothing about when
+    // this effect re-runs, it just removes the need for the disable comment that used to
+    // sit here.
+  }, [merklisteEnabled, tier, loadWishlistCount])
 
   /**
    * The single way back to the scanning step. The camera never stops (the sheet slides up
@@ -452,8 +571,15 @@ export function ScanFlow({
         // T10: the trigger layer's own tier gate, computed the same way as `merkenLocked`
         // below (server prop OR this response's own shape) — never a fresh client guess.
         // `stateRef` (not `state`) because `resolve` is not re-created on every render.
+        // PR5 review fix (Z5): a SERVER-VERIFIED purchase made during this same mount
+        // (`tier_upgraded`, see `handleTierUpgraded`) outranks both signals — the `tier`
+        // prop still carries the mount-time "free" until `router.refresh()` re-serves it,
+        // and this closure would otherwise keep classifying the buyer's own post-purchase
+        // re-resolve as free, skipping every premium consequence below.
         const effectiveTier: EntitlementTier =
-          tier === "free" || stateRef.current.tier === "free" ? "free" : "premium"
+          !tierUpgradedRef.current && (tier === "free" || stateRef.current.tier === "free")
+            ? "free"
+            : "premium"
         // PR2 review fix (C3): the very first moment THIS resolve proves free tier — via
         // either source — the persisted fatigue budget must already be hydrated into
         // reducer state before the `resolved` dispatch below, because THAT dispatch is what
@@ -468,6 +594,22 @@ export function ScanFlow({
           tier: effectiveTier,
           sessionNumber: sessionNumberRef.current,
         })
+        // T16: a premium in-catalog resolve auto-saves server-side (POST /api/scan/resolve
+        // itself, insert-only into scan_wishlist) — refresh the bookmark's count badge so a
+        // newly-auto-saved product is reflected without waiting for the next mount. Free/
+        // flag-off never reach this branch (`effectiveTier` above is never "premium" for a
+        // free session; `merklisteEnabled` is the same server-derived flag gate the mount
+        // effect uses), so neither performs this extra read.
+        if (merklisteEnabled && effectiveTier === "premium" && result.kind === "in_catalog") {
+          // Fix Z5: reconcile FIRST from this response's own `savedState` (the route
+          // predicts `"merkliste"` exactly when it scheduled the deferred insert), then
+          // refetch. Either order is safe now — the refetch counts the union, so a listing
+          // that has not caught up to the deferred write can no longer paint a stale count.
+          if (result.savedState.state === "merkliste") {
+            notePredictedWishlistSave(result.product.productId)
+          }
+          void loadWishlistCount()
+        }
         // Fix round 1 (F2): a masked verdict with the credit already spent MIGHT be the
         // same product the credit was spent on — the reveal endpoint is idempotent, so
         // attempting it silently either re-serves that same card (a rescan or a reload of
@@ -493,6 +635,9 @@ export function ScanFlow({
       analytics,
       clearSheetTimer,
       hydrateFatigueBudget,
+      loadWishlistCount,
+      merklisteEnabled,
+      notePredictedWishlistSave,
       requests,
       returnToScanning,
       revealAlternatives,
@@ -610,6 +755,10 @@ export function ScanFlow({
    * already, or no result yet) has nothing masked to fix, so nothing re-resolves.
    */
   const handleTierUpgraded = useCallback(() => {
+    // PR5 review fix (Z5): remembered in a ref, not only in reducer state, because
+    // `resolve()` is a stable callback — its `tier` prop closure keeps the mount-time
+    // "free" until `router.refresh()` lands, and `stateRef` is read at RESPONSE time.
+    tierUpgradedRef.current = true
     const current = stateRef.current.step
     const productId =
       current.kind === "result" && isMaskedScanVerdict(current.result)
@@ -745,10 +894,25 @@ export function ScanFlow({
         <h1 className="text-[17px] font-bold text-foreground">Scan</h1>
         <ScanWishlistTrigger
           locked={merkenLocked}
+          // T16: premium's bookmark is a one-tap shortcut to the „Gemerkt" section on the
+          // Routine page — the section IS the Merkliste home now (plan ruling), not this
+          // in-flow sheet. Free stays exactly as T9 built it (opens the Premium sheet); the
+          // count badge is `wishlistCount`, which only ever loads when `merklisteEnabled`.
+          count={wishlistCount ?? undefined}
+          // PR5 review fix (Z1): the deep-link fires ONLY when the flag-on „Gemerkt"
+          // section it points at actually exists. `merklisteEnabled` is the same
+          // server-derived flag that gates that section on the Routine page (see
+          // `RoutinePage`/`GemerktSection`), so with the flag off this bookmark keeps
+          // T9's exact pre-branch behaviour — it opens the in-flow `ScanWishlistSheet`,
+          // the only Merkliste surface that exists in that state. Before this fix a
+          // flag-off tap navigated to `/routine#gemerkt`, a page with no such section
+          // and no Merkliste at all.
           onClick={() =>
             merkenLocked
               ? dispatch({ type: "premium_sheet_opened", context: MERKLISTE_GATE })
-              : dispatch({ type: "auxiliary_opened", sheet: "wishlist" })
+              : merklisteEnabled
+                ? navigate("/routine#gemerkt")
+                : dispatch({ type: "auxiliary_opened", sheet: "wishlist" })
           }
         />
       </div>

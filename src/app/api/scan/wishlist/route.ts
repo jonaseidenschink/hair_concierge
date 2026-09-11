@@ -6,6 +6,8 @@ import { loadQuarantinedProductIdsAmong } from "@/lib/scan/catalog-eligibility"
 import { captureScanException } from "@/lib/observability/scan"
 import { createScanRoute, scanFail, scanOk } from "@/lib/scan/route"
 import { hasFreemiumPaidAccess, type FreemiumAccessResult } from "@/lib/entitlements/access"
+import { isFreemiumScannerFirstEnabled } from "@/lib/entitlements/flag"
+import { hasPersonalPlanKeepsakeEvidenceForUser } from "@/lib/personal-plan/keepsake-content"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { isPersonalPlanFieldTestGuest } from "@/lib/supabase/middleware"
 import { createClient } from "@/lib/supabase/server"
@@ -57,6 +59,22 @@ export type ScanWishlistRouteDeps = {
    * response.
    */
   requirePremiumAccess: (userId: string) => Promise<FreemiumAccessResult>
+  /**
+   * T17 keepsake read: the journey's step 11 promise keeps a LAPSED owner's Merkliste
+   * READABLE („Gemerkt" is rendered from exactly this listing). Consulted only after
+   * `requirePremiumAccess` already said `"denied"`, so a premium request's cost is
+   * unchanged and a never-paid free user — who has no keepsake evidence, and whose
+   * Merkliste is empty anyway because auto-save only runs on a premium resolve — still
+   * gets today's 403.
+   *
+   * Read-only: this widens GET alone. Every Merkliste MUTATION (`POST`/`DELETE
+   * /api/scan/save`) keeps its unchanged premium guard, which is why the „Gemerkt"
+   * section renders `readOnly` for this cohort.
+   *
+   * Fail-closed: an unreadable keepsake signal resolves `false` (today's 403), never an
+   * open listing.
+   */
+  allowKeepsakeRead?: (userId: string) => Promise<boolean>
 }
 
 export function createScanWishlistRouteHandler(deps: ScanWishlistRouteDeps) {
@@ -68,7 +86,9 @@ export function createScanWishlistRouteHandler(deps: ScanWishlistRouteDeps) {
     handler: async (ctx) => {
       const access = await deps.requirePremiumAccess(ctx.userId)
       if (access === "unavailable") return scanFail("temporarily_unavailable", 503)
-      if (access === "denied") return scanFail("subscription_required", 403)
+      if (access === "denied" && !(await deps.allowKeepsakeRead?.(ctx.userId))) {
+        return scanFail("subscription_required", 403)
+      }
       const client = deps.createAdminClient()
       const entries = await deps.listWishlist(client, ctx.userId)
       return scanOk({ entries })
@@ -144,10 +164,25 @@ async function requirePremiumAccessForCurrentUser(userId: string): Promise<Freem
   )
 }
 
+/** T17: keepsake evidence, fail-closed to `false` on any read failure. */
+async function hasKeepsakeReadAccess(userId: string): Promise<boolean> {
+  if (!isFreemiumScannerFirstEnabled()) return false
+  try {
+    // PR5 review fix (Z2): a lapsed owner's Merkliste is readable on ANY paid-era
+    // artifact — their own `scan_wishlist` rows included. Requiring an accepted Routine
+    // version here 403'd exactly the users whose saved products this route exists to
+    // return (legacy subscribers, incomplete provisioning).
+    return await hasPersonalPlanKeepsakeEvidenceForUser(userId)
+  } catch {
+    return false
+  }
+}
+
 export const GET = createScanWishlistRouteHandler({
   getUserId: async () => (await (await createClient()).auth.getUser()).data.user?.id ?? null,
   checkRateLimit,
   createAdminClient,
   listWishlist: listScanWishlist,
   requirePremiumAccess: requirePremiumAccessForCurrentUser,
+  allowKeepsakeRead: hasKeepsakeReadAccess,
 })

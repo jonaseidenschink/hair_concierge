@@ -192,6 +192,7 @@ function baseDeps(overrides: Partial<ScanResolveRouteDeps> = {}): ScanResolveRou
     loadPresentationRows: async () => presentationRows,
     resolvePaidAccess: async () => "denied",
     hasUsedFreeReveal: async () => false,
+    autoSaveScanWishlist: async () => {},
     after: () => {},
     ...overrides,
   }

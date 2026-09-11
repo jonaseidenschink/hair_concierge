@@ -11,10 +11,11 @@ import {
   recordNavSurfaceVisited,
   shouldShowNavUnvisitedDot,
 } from "@/lib/personal-plan/lifecycle/repository"
-import { hasCurrentAppAccess } from "@/lib/billing/subscriptions"
+import { resolvePaidAppAccess } from "@/lib/entitlements/access"
 import { getEntitlements, type EntitlementTier } from "@/lib/entitlements"
 import { isFreemiumScannerFirstEnabled } from "@/lib/entitlements/flag"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { isPersonalPlanFieldTestGuest } from "@/lib/supabase/middleware"
 import { createClient } from "@/lib/supabase/server"
 import { loadPersonalPlanJourneyAccessForUser } from "./journey-access-loader"
 import type { PersonalPlanJourneyAccess } from "./journey-access"
@@ -214,8 +215,23 @@ export const loadCachedPersonalPlanJourneyAccessForUser = cache(
   loadPersonalPlanJourneyAccessForUser,
 )
 
+/**
+ * The request-scoped authenticated user, not just their id: the freemium paid-access
+ * composite needs `email` (email-bound manual/moderator grants have no `user_id` row)
+ * and `app_metadata.access_kind` (field-test guests skip the moderator lookup). `cache()`
+ * keeps this to ONE `auth.getUser()` per request, shared with
+ * `loadCachedAuthenticatedAppUserId` below, so nothing pays for the extra fields.
+ */
+const loadCachedAuthenticatedAppUser = cache(
+  async (): Promise<{
+    id: string
+    email?: string | null
+    app_metadata?: Record<string, unknown>
+  } | null> => (await (await createClient()).auth.getUser()).data.user ?? null,
+)
+
 export const loadCachedAuthenticatedAppUserId = cache(
-  async () => (await (await createClient()).auth.getUser()).data.user?.id ?? null,
+  async () => (await loadCachedAuthenticatedAppUser())?.id ?? null,
 )
 
 const loadCachedNavVisitedStateForUser = cache(
@@ -224,16 +240,66 @@ const loadCachedNavVisitedStateForUser = cache(
 )
 
 /**
- * T1's `hasAppAccess` signal, sourced from the same paid-access check used
- * everywhere else in the app (`hasCurrentAppAccess`). Deliberately looked up
- * by user id only (no email lookup here, unlike most other call sites) —
- * this only ever gates a cosmetic nav lock marker for an already-"legacy"
- * journey user, never real access; a manual/moderator grant keyed solely by
- * email is the one case this can miss.
+ * T1's `hasAppAccess` signal.
+ *
+ * **T17 (deferral 2 — T3 note + PR2 review C1).** This used to be
+ * `hasCurrentAppAccess(admin, { userId, email: null })`: user-id only, no email path,
+ * justified at the time because the value gated nothing but a cosmetic nav lock marker.
+ * That justification expired once `/scan`, the gated Routine/Anwendung/Chat pages and
+ * `/profile` all started deriving their REAL behaviour from the email-aware composite
+ * (`resolveAuthenticatedAppPageTier`). An email-bound manual/moderator grant
+ * (friend/tester/admin/support — `findCurrentManualAccessGrant`'s nullable-`user_id`
+ * email path) has no `user_id` row to match, so those holders saw UNLOCKED pages under
+ * LOCKED nav badges — the nav lying about the app.
+ *
+ * It now runs the same composite those surfaces use (`resolvePaidAppAccess`: `active ||
+ * oneTimeAccessState === "active" || moderatorAccess === "active"`, with the
+ * `hasCurrentPaidAppAccess` re-check for an ended/unreadable moderator grant), fed the
+ * email and `access_kind` from the shared request-scoped user read above. Every other
+ * cohort resolves identically to before, with one deliberate exception: an ENDED or
+ * unreadable moderator grant (where the old check reported `active`) now resolves via
+ * the composite's re-check and can flip nav from unlocked to locked — matching what the
+ * page-level gates already do for that cohort. For every other cohort the composite only
+ * ever turns a *false* "free" into "premium", never the reverse.
+ *
+ * `"unavailable"` (an unreadable moderator lookup with no independent paid entitlement)
+ * maps to `true`/premium, matching `resolveAuthenticatedAppPageTier`'s fail-closed rule:
+ * this repo never picks "free" as the fail-closed answer.
+ *
+ * The flag-independent `resolvePaidAppAccess` is deliberate rather than
+ * `hasFreemiumPaidAccess`: the only call site is already inside
+ * `isFreemiumScannerFirstEnabled()` (see `resolveAuthenticatedAppNavigationAccess`), so
+ * the flag gate is not repeated here, and flag-off never reaches this function at all.
  */
+export async function resolveNavigationPaidAccess(
+  userId: string,
+  deps: {
+    loadUser: () => Promise<{
+      id: string
+      email?: string | null
+      app_metadata?: Record<string, unknown>
+    } | null>
+    resolveAccess: typeof resolvePaidAppAccess
+  },
+): Promise<boolean> {
+  const user = await deps.loadUser()
+  // Only trust the session user's email/metadata when it IS this user — the caller
+  // always passes the session's own id today, but nothing in the type enforces it.
+  const sessionUser = user?.id === userId ? user : null
+  const access = await deps.resolveAccess(
+    userId,
+    sessionUser?.email,
+    sessionUser ? isPersonalPlanFieldTestGuest(sessionUser) : false,
+  )
+  return access !== "denied"
+}
+
 const loadCachedHasAppAccessForUser = cache(
   (userId: string): Promise<boolean> =>
-    hasCurrentAppAccess(createAdminClient(), { userId, email: null }),
+    resolveNavigationPaidAccess(userId, {
+      loadUser: loadCachedAuthenticatedAppUser,
+      resolveAccess: resolvePaidAppAccess,
+    }),
 )
 
 export type SchedulePersonalPlanNavSurfaceVisitDeps = {

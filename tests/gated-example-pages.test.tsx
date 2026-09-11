@@ -13,8 +13,9 @@ import { GatedRoutineExample } from "../src/components/gated-preview/gated-routi
 import { GATED_EXAMPLE_COPY } from "../src/lib/gated-preview/example-copy"
 import { GATED_EXAMPLE_PRODUCTS } from "../src/lib/gated-preview/fixtures/example-products"
 import { GATED_CHAT_EXAMPLE_MESSAGES } from "../src/lib/gated-preview/fixtures/chat-example"
-import { shouldRenderGatedExample } from "../src/lib/gated-preview/gate"
+import { resolveGatedPageMode, shouldRenderGatedExample } from "../src/lib/gated-preview/gate"
 import {
+  loadAuthenticatedAppAccessState,
   loadAuthenticatedAppPageTier,
   resolveAuthenticatedAppPageTier,
 } from "../src/lib/auth/authenticated-app-route-access"
@@ -78,6 +79,11 @@ test("with the freemium flag off the tier resolves premium without any lookup", 
     // node test with no request context.
     assert.equal(await loadAuthenticatedAppPageTier(), "premium")
     assert.equal(await shouldRenderGatedExample(), false)
+    // T17: the three pages branch on `resolveGatedPageMode`, whose flag-off short-circuit
+    // is the same one — `"premium"` before any client is created, so neither the tier
+    // composite nor the keepsake read happens.
+    assert.equal(await loadAuthenticatedAppAccessState(), "premium")
+    assert.equal(await resolveGatedPageMode(), "premium")
   } finally {
     if (previous === undefined) delete process.env.FREEMIUM_SCANNER_FIRST_ENABLED
     else process.env.FREEMIUM_SCANNER_FIRST_ENABLED = previous
@@ -90,21 +96,24 @@ const GATED_ROUTES = [
   ["app/routine/page.tsx", "GatedRoutineExample"],
   ["app/anwendung/page.tsx", "GatedAnwendungExample"],
   ["app/chat/page.tsx", "GatedChatExample"],
+  ["app/chat/[conversationId]/page.tsx", "GatedChatExample"],
 ] as const
 
 for (const [route, component] of GATED_ROUTES) {
   test(`${route} gates on the server tier before it renders the real page`, () => {
     const source = readFileSync(path.join(SOURCE_ROOT, route), "utf8")
-    const gate = source.indexOf("shouldRenderGatedExample()")
+    const gate = source.indexOf("resolveGatedPageMode()")
     assert.ok(gate > -1, `${route} must derive the tier server-side`)
+    // The window is a readability bound, not a contract: PR5's keepsake branch (Z2's
+    // routine-less state) sits between the gate and the free-tier return on /routine.
     assert.match(
-      source.slice(gate, gate + 900),
+      source.slice(gate, gate + 1500),
       new RegExp(`return <${component} \\/>`),
       `${route} must return the example for the free tier`,
     )
     // The gate is a guard clause, not a wrapper: everything the real page does still
     // happens verbatim below it for premium and for flag-off.
-    assert.ok(source.indexOf("shouldRenderGatedExample") < source.lastIndexOf("return"))
+    assert.ok(source.indexOf("resolveGatedPageMode") < source.lastIndexOf("return"))
   })
 }
 
@@ -124,7 +133,7 @@ test("routine and anwendung resolve the tier concurrently with their own page da
 
   for (const [route, resolver] of cases) {
     const source = readFileSync(path.join(SOURCE_ROOT, route), "utf8")
-    const gate = source.indexOf("shouldRenderGatedExample()")
+    const gate = source.indexOf("resolveGatedPageMode()")
     assert.ok(gate > -1, `${route} must derive the tier server-side`)
     // Both files also use `Promise.all` internally (parallel content/DB reads inside the
     // resolver itself) — find the one that actually wraps the tier check, not the first
@@ -136,7 +145,7 @@ test("routine and anwendung resolve the tier concurrently with their own page da
     const block = source.slice(promiseAll, closing)
     assert.match(
       block,
-      /shouldRenderGatedExample\(\)/,
+      /resolveGatedPageMode\(\)/,
       `${route}: tier check must be inside the Promise.all`,
     )
     assert.match(
@@ -156,7 +165,7 @@ test("routine and anwendung resolve the tier concurrently with their own page da
 // serialized behind one `auth.getUser()` plus the paid-access composite); flag off stays the
 // literal pre-branch page — no tier call, no Suspense wrapper, byte-identical to today. This
 // pins both halves of that split so a regression back to one unconditional
-// `await shouldRenderGatedExample()` (reintroducing the added latency on every premium
+// `await resolveGatedPageMode()` (reintroducing the added latency on every premium
 // render) — or a Suspense wrapper that also wraps the flag-off branch (breaking byte-identity)
 // — fails this test even though the free/premium behaviour it renders is unchanged either way.
 test("/chat streams the tier check behind Suspense only when the flag is on; flag off stays branch-free (X2)", () => {
@@ -185,7 +194,7 @@ test("/chat streams the tier check behind Suspense only when the flag is on; fla
   assert.ok(segmentStart > -1, "the tier branch must live in its own async segment component")
   const segmentEnd = source.indexOf("\n}", segmentStart)
   const segmentBody = source.slice(segmentStart, segmentEnd)
-  assert.match(segmentBody, /shouldRenderGatedExample\(\)/)
+  assert.match(segmentBody, /resolveGatedPageMode\(\)/)
   assert.match(segmentBody, /return <GatedChatExample \/>/)
   assert.match(segmentBody, /return <ChatContainer \/>/)
 

@@ -95,6 +95,7 @@ function baseDeps(overrides: Partial<ScanResolveRouteDeps> = {}): ScanResolveRou
     // and override both.
     resolvePaidAccess: async () => "allowed",
     hasUsedFreeReveal: async () => false,
+    autoSaveScanWishlist: async () => {},
     // Next's real `after` throws outside a request scope, and these tests assert on the
     // response only. Tests that assert on the deferred telemetry swap in
     // `collectAttempts().deps.after`, which records the task so `flush()` can drain it.

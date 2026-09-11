@@ -10,6 +10,8 @@ import {
   BottomSheetTitle,
 } from "@/components/ui/bottom-sheet"
 import { Button } from "@/components/ui/button"
+import { PremiumSheet } from "@/components/premium-sheet/premium-sheet"
+import type { PremiumSheetContext } from "@/lib/premium-sheet/context"
 import { routineAnalytics } from "@/lib/personal-plan/routine/analytics"
 import { CATEGORY_ROLE_POLICIES } from "@/lib/personal-plan/products/authorities"
 import type {
@@ -41,6 +43,13 @@ import type { RoutineRefinementBannerViewModel } from "./routine-refinement-bann
 
 type RoutineViewResponse = PersonalPlanRoutineView | { status: "no_personal_plan" }
 type Mode = "overview" | "editor"
+
+/**
+ * T17: the gate a lapsed owner opens from their own Routine. Same `{feature, source}`
+ * pair the T12 „Beispiel" Routine uses (`GATED_EXAMPLE_COPY.routine`), so the sheet
+ * orders its benefits the same way from either surface.
+ */
+const KEEPSAKE_ROUTINE_GATE = { feature: "routine", source: "gated:routine" } as const
 
 function readError(response: Response, fallback: string) {
   return response
@@ -214,11 +223,35 @@ export function PersonalPlanRoutineClient({
   enabled,
   portfolioPresentation = null,
   initialRefinementBanner = null,
+  merklisteEnabled = false,
+  keepsake = false,
 }: {
   initialView: PersonalPlanRoutineView
   enabled: boolean
   portfolioPresentation?: PortfolioPresentation | null
   initialRefinementBanner?: RoutineRefinementBannerViewModel | null
+  /**
+   * T16, fix round 1 (F1): server-derived freemium-flag gate for the shared „Gemerkt"
+   * section (`GemerktSection`, rendered inside `RoutinePage`) — see that component's doc
+   * comment. Defaults to `false` so an existing caller that forgets to pass it stays on
+   * today's exact behavior.
+   */
+  merklisteEnabled?: boolean
+  /**
+   * T17 keepsake mode: this is a LAPSED owner reading their OWN confirmed Routine after
+   * their access ended. The caller passes `enabled={false}`, which already disables the
+   * entry sync, the editor and the proposal machinery; `keepsake` additionally
+   *
+   * - drops the per-item product-detail read (`GET /api/personal-plan/routine/items/…`
+   *   is outside the freemium admission list and answers 403 for them — the cards render
+   *   as plain rows instead of buttons that error),
+   * - locks „Anpassen" to the Premium sheet instead of hiding it (the owner should see
+   *   what they get back, not a silently reduced page), and
+   * - renders „Gemerkt" read-only.
+   *
+   * Defaults to `false`: premium and flag-off render byte-identically to today.
+   */
+  keepsake?: boolean
 }) {
   const router = useRouter()
   const pathname = usePathname()
@@ -280,6 +313,20 @@ export function PersonalPlanRoutineClient({
   const [proposalRetryId, setProposalRetryId] = React.useState<string | null>(null)
   const [detail, setDetail] = React.useState<RoutineProductDetailData | null>(null)
   const [detailOpen, setDetailOpen] = React.useState(false)
+  // T17 keepsake: the one gate this page can open. Same shape as `GatedPreview`'s and
+  // T15's Profil opener. Never rendered outside keepsake mode.
+  const [premiumSheetOpen, setPremiumSheetOpen] = React.useState(false)
+  const [premiumSheetContext, setPremiumSheetContext] = React.useState<PremiumSheetContext | null>(
+    null,
+  )
+  const openPremiumSheet = React.useCallback((context: PremiumSheetContext) => {
+    setPremiumSheetContext(context)
+    setPremiumSheetOpen(true)
+  }, [])
+  const openKeepsakeRoutineGate = React.useCallback(
+    () => openPremiumSheet(KEEPSAKE_ROUTINE_GATE),
+    [openPremiumSheet],
+  )
   const syncedOnEntry = React.useRef(false)
   const displayedProposalId = React.useRef<string | null>(null)
   const proposalResolutionInFlight = React.useRef(false)
@@ -380,6 +427,56 @@ export function PersonalPlanRoutineClient({
       changeCountBand: countBand(pending.delta.direct.length + pending.delta.consequential.length),
     })
   }, [pending, proposalOpen])
+
+  /**
+   * PR5 review fix (Z3): the graduation hand-off. „Zur Routine hinzufügen" →
+   * „Benutze ich schon" writes ownership and drops the product from „Gemerkt" — but the
+   * visible Routine is compiled from the confirmed version, so before this fix the product
+   * simply vanished with nothing to show for it.
+   *
+   * The hand-off now runs the EXISTING flows and nothing else — no implicit routine write
+   * is added here:
+   * 1. the routine sync (the same `POST /api/personal-plan/routine/sync` this page already
+   *    kicks on entry), which is the queued path that can surface a change; the user sees
+   *    an honest in-progress state while it runs,
+   * 2. if it staged a proposal, the existing proposal sheet opens on it — where the change
+   *    is reviewed and accepted, exactly as for any other successor,
+   * 3. otherwise the truthful outcome: the product is saved as owned, the Routine has not
+   *    changed, and „Routine anpassen" hands the user into the existing editor.
+   */
+  const [graduation, setGraduation] = React.useState<{
+    name: string
+    status: "pending" | "proposal" | "unchanged"
+  } | null>(null)
+
+  const handleGraduated = React.useCallback(
+    (product: { productId: string; name: string }) => {
+      setGraduation({ name: product.name, status: "pending" })
+      void (async () => {
+        try {
+          // `enabled === false` means the successor machinery is off for this render
+          // (Stage-4 flag off, or a keepsake read): the sync route would refuse it, so the
+          // hand-off goes straight to its honest terminal state.
+          if (enabled) {
+            const response = await fetch("/api/personal-plan/routine/sync", { method: "POST" })
+            if (!response.ok) throw new Error(await readError(response, "temporarily_unavailable"))
+          }
+          const next = await reload()
+          if (next.pendingProposal) {
+            setProposalOpen(true)
+            setGraduation({ name: product.name, status: "proposal" })
+            return
+          }
+          setGraduation({ name: product.name, status: "unchanged" })
+        } catch {
+          // The ownership write already succeeded — only the "did the Routine move?"
+          // question is unanswered, so say the smaller, certain thing.
+          setGraduation({ name: product.name, status: "unchanged" })
+        }
+      })()
+    },
+    [enabled, reload],
+  )
 
   const openEditor = React.useCallback(() => {
     if (!canEdit) return
@@ -590,19 +687,48 @@ export function PersonalPlanRoutineClient({
           {error}
         </p>
       ) : null}
+      {graduation ? (
+        <section
+          aria-live="polite"
+          className="mx-auto mt-4 w-full max-w-2xl rounded-[12px] border border-border bg-card px-4 py-3"
+        >
+          <p className="text-sm text-foreground">
+            {graduation.status === "pending"
+              ? `${graduation.name} wird übernommen …`
+              : graduation.status === "proposal"
+                ? `${graduation.name} ist gespeichert. Prüfe den Vorschlag für deine Routine.`
+                : `${graduation.name} ist als „benutze ich schon" gespeichert. In deiner Routine steht es noch nicht.`}
+          </p>
+          {graduation.status === "unchanged" && canEdit ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="mt-3 w-auto"
+              onClick={openEditor}
+            >
+              Routine anpassen
+            </Button>
+          ) : null}
+        </section>
+      ) : null}
       <RoutinePage
         view={view}
         onEdit={canEdit ? openEditor : undefined}
+        onLockedEdit={keepsake ? openKeepsakeRoutineGate : undefined}
         onReviewProposal={
           !isInitial && pending && enabled ? () => setProposalOpen(true) : undefined
         }
-        onItemDetail={(item) => void openDetail(item)}
+        onItemDetail={keepsake ? undefined : (item) => void openDetail(item)}
+        merklisteReadOnly={keepsake}
         portfolioPresentation={portfolioPresentation}
         refinementBanner={refinementBanner}
         onDismissRefinementBanner={dismissRefinementBanner}
         onRefineFromBanner={refineFromBanner}
         showPlanUpdatedToast={showPlanUpdatedToast}
         onDismissPlanUpdatedToast={dismissPlanUpdatedToast}
+        merklisteEnabled={merklisteEnabled}
+        onGraduated={handleGraduated}
       />
       {pending ? (
         <RoutineProposalSheet
@@ -668,6 +794,19 @@ export function PersonalPlanRoutineClient({
           ) : null}
         </BottomSheetContent>
       </BottomSheet>
+      {keepsake ? (
+        <PremiumSheet
+          open={premiumSheetOpen}
+          context={premiumSheetContext}
+          onClose={() => {
+            setPremiumSheetOpen(false)
+            setPremiumSheetContext(null)
+          }}
+          // No `onUnlocked` copy to flip: this page's keepsake mode is a SERVER prop, so
+          // the sheet's own `router.refresh()` after a verified purchase re-resolves it.
+          onRequestOpen={(context) => openPremiumSheet(context ?? KEEPSAKE_ROUTINE_GATE)}
+        />
+      ) : null}
     </>
   )
 }

@@ -110,9 +110,38 @@ export function isFreemiumAdmittedRoutePath(pathname: string) {
   return FREEMIUM_ADMITTED_ROUTE_PREFIXES.some((prefix) => pathMatchesRoutePrefix(pathname, prefix))
 }
 
+// Freemium keepsake reads (flag-gated, T17): the journey's step 11 promise —
+// "profile, Merkliste and routine remain readable … nothing free is ever
+// removed" — needs the user's OWN conversation history to stay readable on
+// `/chat/[conversationId]` after a lapse. `/api/chat` therefore gains a
+// carve-out that is scoped by METHOD, not just by path: only `GET` is admitted
+// (`GET /api/chat` lists the caller's own conversations, `GET /api/chat/[id]`
+// returns one of their own conversations' messages — both are session-scoped,
+// owner-filtered reads). Every mutating method on this prefix — `POST
+// /api/chat` (the streaming turn), `POST /api/chat/trigger`, `POST
+// /api/chat/product-selection`, `POST /api/chat/feedback` and `DELETE
+// /api/chat/[id]` — keeps the ordinary `subscription_required` 403 from the
+// paywall below, which is what keeps chat itself premium. This is deliberately
+// NOT an entry in `FREEMIUM_ADMITTED_ROUTE_PREFIXES`: that list admits a prefix
+// wholesale, which would open the streaming endpoint (no /api/chat route has an
+// in-route entitlement guard — see plans/freemium-scanner-first/enforcement-matrix.md).
+const FREEMIUM_KEEPSAKE_READ_ROUTE_PREFIXES = ["/api/chat"]
+
+export function isFreemiumKeepsakeReadRoutePath(pathname: string) {
+  return FREEMIUM_KEEPSAKE_READ_ROUTE_PREFIXES.some((prefix) =>
+    pathMatchesRoutePrefix(pathname, prefix),
+  )
+}
+
 export type ReactivationRedirectContext = {
   pathname: string
   freemiumScannerFirstEnabled: boolean
+  /**
+   * The request method, used only by the keepsake read carve-out above. Omitted
+   * (as every pre-T17 caller and test does) it can never admit anything: the
+   * carve-out requires a literal `"GET"`.
+   */
+  method?: string
 }
 
 /**
@@ -127,7 +156,56 @@ export function shouldRedirectToReactivation(ctx: ReactivationRedirectContext): 
   if (ctx.freemiumScannerFirstEnabled && isFreemiumAdmittedRoutePath(ctx.pathname)) {
     return false
   }
+  // T17 keepsake reads — GET only, see `FREEMIUM_KEEPSAKE_READ_ROUTE_PREFIXES`.
+  if (
+    ctx.freemiumScannerFirstEnabled &&
+    ctx.method === "GET" &&
+    isFreemiumKeepsakeReadRoutePath(ctx.pathname)
+  ) {
+    return false
+  }
   return true
+}
+
+export type PersonalPlanFrontierBypassContext = {
+  pathname: string
+  freemiumScannerFirstEnabled: boolean
+  /** Whether the subscription paywall actually ran for this request (`requiresSubscriptionPath`). */
+  subscriptionChecked: boolean
+  /** The paywall's own composite: `active || oneTime === "active" || moderator === "active"`. */
+  hasPaidAppAccess: boolean
+  /** The routing frontier resolved for this user. */
+  frontierKind: PersonalPlanRoutingFrontier["kind"]
+}
+
+/**
+ * T2 review finding I2, implemented in T17: the Personal-Plan frontier redirect
+ * bounces a LAPSED user off `/routine` and `/anwendung` to `/plan-start`, which is
+ * not a freemium-admitted route and therefore lands them on `/reactivate` — the
+ * exact bounce the keepsake journey step forbids. Under the flag, suppress that one
+ * redirect for a user who has no current paid access on a freemium-admitted route.
+ *
+ * Never-paid users are unaffected *by construction*, not merely by intent: their
+ * routing source does not exist, so `loadPersonalPlanRoutingFrontierForUser` resolves
+ * `{ kind: "legacy" }` and `getPersonalPlanFrontierRedirect` already returns `null`
+ * for them. Requiring `frontierKind === "personal_plan"` here makes that explicit, so
+ * the bypass can only ever fire for someone who reached the Personal-Plan journey —
+ * i.e. someone who paid.
+ *
+ * Scope discipline: this suppresses the REDIRECT only. The frontier is still loaded,
+ * and its unavailable/error path (the 503 in the surrounding `catch`) is untouched for
+ * everyone — an unreadable frontier keeps failing closed to today's behaviour.
+ */
+export function shouldBypassPersonalPlanFrontierRedirect(
+  ctx: PersonalPlanFrontierBypassContext,
+): boolean {
+  return (
+    ctx.freemiumScannerFirstEnabled &&
+    ctx.subscriptionChecked &&
+    !ctx.hasPaidAppAccess &&
+    ctx.frontierKind === "personal_plan" &&
+    isFreemiumAdmittedRoutePath(ctx.pathname)
+  )
 }
 
 export function isAdminRoutePath(pathname: string) {
@@ -522,6 +600,7 @@ export function createUpdateSession(
           shouldRedirectToReactivation({
             pathname,
             freemiumScannerFirstEnabled,
+            method: request.method,
           })
         ) {
           if (pathMatchesRoutePrefix(pathname, "/api")) {
@@ -577,7 +656,16 @@ export function createUpdateSession(
             : null
         const frontierRedirect =
           moderatorEntryRedirect ?? getPersonalPlanFrontierRedirect(pathname, frontier)
-        if (frontierRedirect) {
+        // T17 (T2 review finding I2): a lapsed owner keeps their keepsake reads on
+        // `/routine` and `/anwendung` instead of being bounced to `/plan-start` → `/reactivate`.
+        const keepsakeFrontierBypass = shouldBypassPersonalPlanFrontierRedirect({
+          pathname,
+          freemiumScannerFirstEnabled,
+          subscriptionChecked: needsSub,
+          hasPaidAppAccess: hasPaidAppAccessResult,
+          frontierKind: frontier.kind,
+        })
+        if (frontierRedirect && !keepsakeFrontierBypass) {
           const url = buildAuthenticatedIntakeRedirectUrl(
             request.nextUrl,
             pathname,

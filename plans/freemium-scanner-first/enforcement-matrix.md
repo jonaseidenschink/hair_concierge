@@ -56,7 +56,7 @@ unrelated moderator-lookup outage) would have been 503'd by the guard where
 | `/api/scan/submit` | POST | free (auth + rate limit only) | middleware admits; unaffected by this task | same as above (`/api/scan` prefix) |
 | `/api/scan/save` | POST (move to routine/Merkliste) | **premium** | **in-route guard** (new, T4) — `requirePremiumAccess` dep, wired to `hasFreemiumPaidAccess` in `src/app/api/scan/save/route.ts` | `tests/freemium-enforcement-matrix.test.ts` → `"scan save POST: a free-tier user (flag-ON reachable) is denied with the middleware's subscription_required shape"`; paid pass: `"scan save POST: a paid user (composite allowed) passes through unchanged"` |
 | `/api/scan/save` | DELETE (remove from routine/Merkliste) | **premium** | **in-route guard** (new, T4), same dep | `tests/freemium-enforcement-matrix.test.ts` → `"scan save DELETE: a free-tier user is denied before any removal"` |
-| `/api/scan/wishlist` | GET (Merkliste listing) | **premium** | **in-route guard** (new, T4) — `requirePremiumAccess` dep, wired to `hasFreemiumPaidAccess` in `src/app/api/scan/wishlist/route.ts` | `tests/freemium-enforcement-matrix.test.ts` → `"scan wishlist GET: a free-tier user is denied with the middleware's subscription_required shape"`; paid pass: `"scan wishlist GET: a paid user passes through unchanged"` |
+| `/api/scan/wishlist` | GET (Merkliste listing) | **premium OR keepsake** (T17) | **in-route guard** (T4) — `requirePremiumAccess`, plus T17's `allowKeepsakeRead`, consulted **only after** the composite already said `"denied"`: a LAPSED owner (accepted Routine version on record) keeps READING their Merkliste, which is what the „Gemerkt" section renders. A never-paid user has no keepsake evidence and still gets the 403; a moderator/entitlement outage still outranks keepsake with the retriable 503. Read-only — every Merkliste WRITE below is untouched. | `tests/freemium-enforcement-matrix.test.ts` → `"scan wishlist GET: a free-tier user is denied with the middleware's subscription_required shape"`; paid pass: `"scan wishlist GET: a paid user passes through unchanged"`; keepsake: `tests/freemium-lapsed-user-matrix.test.ts` → `"Merkliste GET: premium unchanged, lapsed reads, never-paid still 403"` |
 | `/api/scan/reveal` (or equivalent one-lifetime-reveal endpoint) | POST | **premium action for a free user** (consumes the one-lifetime-reveal credit; distinct from ordinary premium — a free user is the intended caller once, ledger-gated) | **planned (T8)** — endpoint does not exist yet; masked-alternative contract + reveal ledger land in T8 | none yet — add with T8 |
 
 Note: `hasFreemiumPaidAccess` recomputes the composite directly (admin client
@@ -88,10 +88,44 @@ asserted identical).
 | Route | Method | Required entitlement | Enforcing seam | Test |
 | --- | --- | --- | --- | --- |
 | `/api/profile` | GET | premium today; **future: free read** (not changed in this task — a later PR is expected to move Haar-Check display data to a free read; see plan.md §8 T4 note) | middleware carve-out (`/api/profile` not in `FREEMIUM_ADMITTED_ROUTE_PREFIXES`) | `tests/freemium-enforcement-matrix.test.ts` → `"flag on: a free authenticated user is still denied /api/profile (non-admitted, subscription_required)"` (added by this task — previously only the pure-function prefix-list test existed); baseline prefix coverage: `tests/freemium-admission-middleware.test.ts` → `"flag on: non-admitted routes still redirect to reactivation"` |
-| `/api/profile` | PUT (Haar-Check fields) | **premium** | middleware carve-out | same tests as GET above (method-agnostic: middleware gates the whole prefix) |
-| `/api/chat` | POST | **premium** | middleware carve-out | `tests/auth-middleware-personal-plan-routine.test.ts` → `"flag on: a free authenticated user without current access is still gated on a non-admitted route (/api/chat stays subscription_required)"` (full `createUpdateSession` e2e, asserts the exact `{ error: "subscription_required" }` / 403 shape); prefix coverage: `tests/freemium-admission-middleware.test.ts` → `"flag on: non-admitted routes still redirect to reactivation"` |
+| `/api/profile` | PUT (Haar-Check fields) | **premium** | middleware carve-out | method-agnostic (middleware gates the whole prefix regardless of method) — T15 added a PUT-specific proof: `tests/freemium-enforcement-matrix.test.ts` → `"flag on: a free authenticated user is still denied PUT /api/profile (non-admitted, subscription_required)"`, paid pass: `"flag on: a paid authenticated user reaches PUT /api/profile unchanged"` |
+| `/api/chat`, `/api/chat/[id]`, `/api/chat/trigger`, `/api/chat/product-selection`, `/api/chat/feedback` | POST / DELETE (every mutating method) | **premium** | middleware carve-out | `tests/auth-middleware-personal-plan-routine.test.ts` → `"flag on: a free authenticated user without current access is still gated on a non-admitted route (POST /api/chat stays subscription_required)"` (full `createUpdateSession` e2e over all five mutating routes, asserts the exact `{ error: "subscription_required" }` / 403 shape); prefix coverage: `tests/freemium-admission-middleware.test.ts` → `"flag on: non-admitted routes still redirect to reactivation"` |
+| `/api/chat`, `/api/chat/[id]` | **GET only** | free-to-reach (auth-scoped own-data read) — **T17 keepsake carve-out** | **middleware carve-out, scoped by METHOD**: `FREEMIUM_KEEPSAKE_READ_ROUTE_PREFIXES` + `shouldRedirectToReactivation`'s `method === "GET"` branch. Deliberately NOT an entry in `FREEMIUM_ADMITTED_ROUTE_PREFIXES`, which admits a prefix wholesale and would open the streaming `POST` (no route under `/api/chat` carries an in-route entitlement guard). Both handlers read through the caller's own session client filtered by `user_id`, so a user only ever sees their own conversations — a never-paid user's list is empty. | `tests/freemium-lapsed-user-matrix.test.ts` → `"the keepsake read carve-out is scoped to GET on /api/chat and nothing else"`; e2e: `tests/auth-middleware-personal-plan-routine.test.ts` → `"flag on: GET /api/chat and GET /api/chat/[id] are admitted for keepsake reads (T17)"`, flag-off: `"flag off: GET /api/chat is still subscription_required (byte-identical)"` |
 | `/api/personal-plan/stage-1/previews` | GET | **premium** | middleware carve-out (`/api/personal-plan` prefix) | `tests/freemium-enforcement-matrix.test.ts` → `"flag on: a free authenticated user is still denied /api/personal-plan/stage-1/previews (non-admitted, subscription_required)"` (added by this task — previously only the `/api/personal-plan` prefix-list test existed, not this concrete route); prefix coverage: `tests/freemium-admission-middleware.test.ts` → `"flag on: non-admitted routes still redirect to reactivation"` |
 | `/api/routine`, `/api/tracker`, `/api/memory`, `/api/product-intake` | (all methods) | premium | middleware carve-out | `tests/freemium-admission-middleware.test.ts` → `"flag on: non-admitted routes still redirect to reactivation"` (prefix-level; no route-specific e2e test added — brief scope is `/api/scan/*`, `/api/profile`, `/api/chat`, `/api/personal-plan/stage-1/previews`) |
+
+**T15 finding (Profil page audit):** `/profile`'s inline Haar-Check editor
+(`src/app/profile/page.tsx`, `handleSaveQuiz`) does **not** call `PUT
+/api/profile` — it writes to `hair_profiles` directly through the browser
+Supabase client (`supabase.from("hair_profiles").upsert(...)`). RLS policy
+`hair_profiles_update_own` (`supabase/migrations/00001_initial_schema.sql`)
+lets any authenticated owner write their own row with no tier check — this is
+intentional and pre-existing (onboarding itself writes the first Haar-Check
+before any subscription exists) and is a data-ownership boundary, not a
+paywall; changing it is a migration, out of scope for T15 (no migrations,
+no profile redesign). T15's corner lock is therefore a **client UX gate**:
+every entry point into edit mode (`startQuizEditing` — the header button, an
+individual Haar-Check field card, the "Haarlänge ergänzen" prompt) is gated
+in one place, so a free user has no UI path into `handleSaveQuiz` at all. A
+technical user could still POST to Supabase directly and write their own row
+— identical to what they could always do before this task, since the direct
+write path predates the freemium restructure and is untouched by it.
+`PUT /api/profile` itself stays middleware-gated as documented above — but
+**(F4 correction, fix round 1)** it currently has zero in-repo callers, GET or
+PUT (`src/app/api/profile/route.ts` is dead code); the earlier "used by
+other, unrelated consumers" claim was false. The route is guarded but
+unconsumed; it enforces nothing for this page today.
+
+**Client-gate exception ruling (fix round 1, F5 in `task-15-review.md`):**
+Haar-Check content is user-owned intake, not paid content; the T15 lock is a
+UI gate by design. Server enforcement is not applicable because two
+un-paywalled write paths (onboarding, quiz retake → `linkQuizToProfile`) must
+remain open. No paid seam. This is a documented **client-gate exception**:
+blast radius is self-only (a bypass only lets a user rewrite their own
+`hair_profiles` row — no plan recompute, no generation cost, no cross-user
+effect, per `task-15-review.md`'s adjudication), and two sanctioned free write
+paths to the same row already exist — onboarding and `/quiz?mode=retake`. The
+exception applies to this one page's inline editor only.
 
 ## Flag-off regression coverage
 

@@ -321,9 +321,62 @@ test("flag on: a free authenticated user (no current access) reaches /tracker in
   }
 })
 
-test("flag on: a free authenticated user without current access is still gated on a non-admitted route (/api/chat stays subscription_required)", async () => {
+test("flag on: a free authenticated user without current access is still gated on a non-admitted route (POST /api/chat stays subscription_required)", async () => {
   const original = process.env.FREEMIUM_SCANNER_FIRST_ENABLED
   process.env.FREEMIUM_SCANNER_FIRST_ENABLED = "true"
+  try {
+    for (const request of [
+      new NextRequest("https://chaarlie.de/api/chat", { method: "POST" }),
+      new NextRequest("https://chaarlie.de/api/chat/conversation-1", { method: "DELETE" }),
+      new NextRequest("https://chaarlie.de/api/chat/feedback", { method: "POST" }),
+      new NextRequest("https://chaarlie.de/api/chat/trigger", { method: "POST" }),
+      new NextRequest("https://chaarlie.de/api/chat/product-selection", { method: "POST" }),
+      new NextRequest("https://chaarlie.de/api/profile"),
+    ]) {
+      const response = await createMiddleware({
+        currentAccess: false,
+        userAppMetadata: {},
+      })(request)
+
+      assert.equal(response.status, 403, `${request.method} ${request.nextUrl.pathname}`)
+      const body = await response.json()
+      assert.deepEqual(body, { error: "subscription_required" })
+    }
+  } finally {
+    if (original === undefined) delete process.env.FREEMIUM_SCANNER_FIRST_ENABLED
+    else process.env.FREEMIUM_SCANNER_FIRST_ENABLED = original
+  }
+})
+
+// T17 keepsake reads: a lapsed owner's own conversation history has to stay readable on
+// `/chat/[conversationId]`, which needs `GET /api/chat` and `GET /api/chat/[id]`. The
+// carve-out is scoped by METHOD, deliberately NOT by adding `/api/chat` to
+// `FREEMIUM_ADMITTED_ROUTE_PREFIXES` — that would admit the streaming POST too, since no
+// route under this prefix carries an in-route entitlement guard (enforcement-matrix.md).
+// Both reads are session-scoped and owner-filtered, so a never-paid user reaching them
+// sees only their own (empty) history.
+test("flag on: GET /api/chat and GET /api/chat/[id] are admitted for keepsake reads (T17)", async () => {
+  const original = process.env.FREEMIUM_SCANNER_FIRST_ENABLED
+  process.env.FREEMIUM_SCANNER_FIRST_ENABLED = "true"
+  try {
+    for (const pathname of ["/api/chat", "/api/chat/conversation-1"]) {
+      const response = await createMiddleware({
+        currentAccess: false,
+        userAppMetadata: {},
+      })(new NextRequest(`https://chaarlie.de${pathname}`))
+
+      assert.equal(response.status, 200, pathname)
+      assert.equal(response.headers.get("location"), null, pathname)
+    }
+  } finally {
+    if (original === undefined) delete process.env.FREEMIUM_SCANNER_FIRST_ENABLED
+    else process.env.FREEMIUM_SCANNER_FIRST_ENABLED = original
+  }
+})
+
+test("flag off: GET /api/chat is still subscription_required (byte-identical)", async () => {
+  const original = process.env.FREEMIUM_SCANNER_FIRST_ENABLED
+  delete process.env.FREEMIUM_SCANNER_FIRST_ENABLED
   try {
     const response = await createMiddleware({
       currentAccess: false,
@@ -331,8 +384,7 @@ test("flag on: a free authenticated user without current access is still gated o
     })(new NextRequest("https://chaarlie.de/api/chat"))
 
     assert.equal(response.status, 403)
-    const body = await response.json()
-    assert.deepEqual(body, { error: "subscription_required" })
+    assert.deepEqual(await response.json(), { error: "subscription_required" })
   } finally {
     if (original === undefined) delete process.env.FREEMIUM_SCANNER_FIRST_ENABLED
     else process.env.FREEMIUM_SCANNER_FIRST_ENABLED = original

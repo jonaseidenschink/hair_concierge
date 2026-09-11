@@ -36,6 +36,13 @@ type ProductIntakeCardProps = {
     submissionId: string | null
     matchedProductId: string | null
   }) => void
+  /**
+   * PR5 review fix (Z4): keepsake history. This form's submit is a
+   * `POST /api/product-intake`, which answers 403 for a LAPSED owner — so in their history
+   * it renders as a static note of what was asked, with no fields and no request path at
+   * all. Defaults to `false`: premium and flag-off render byte-identically to today.
+   */
+  readOnly?: boolean
 }
 
 type ProductIntakeSubmittedStatus = "pending_review" | "matched"
@@ -46,6 +53,7 @@ export function ProductIntakeCard({
   sourceMessageId,
   persistedState,
   onSubmitted,
+  readOnly = false,
 }: ProductIntakeCardProps) {
   const brandListId = useId()
   const [method, setMethod] = useState<ProductIntakeMethod>(offer.intake_method ?? "photo")
@@ -240,6 +248,12 @@ export function ProductIntakeCard({
     return <ProductIntakeSubmittedState status="matched" />
   }
 
+  // Z4: a historical, un-submitted offer for a keepsake reader. Everything below this
+  // point is a live form whose only outcome would be a 403.
+  if (readOnly && !submittedStatus && !persistedState?.submittedStatus) {
+    return <ProductIntakeKeepsakeState />
+  }
+
   const effectiveSubmittedStatus = submittedStatus ?? persistedState?.submittedStatus ?? null
   if (effectiveSubmittedStatus) {
     return <ProductIntakeSubmittedState status={effectiveSubmittedStatus} />
@@ -330,6 +344,21 @@ export function ProductIntakeCard({
           {busy === "submit" ? "Speichern..." : "Produkt einreichen"}
         </Button>
       </div>
+    </div>
+  )
+}
+
+/**
+ * Z4: the static stand-in for a live intake form in keepsake history — the same card
+ * shape, none of its controls, and no path to a request.
+ */
+export function ProductIntakeKeepsakeState() {
+  return (
+    <div className="w-full min-w-0 rounded-2xl border border-border/80 bg-card p-4 shadow-sm">
+      <p className="text-sm font-semibold text-[var(--text-heading)]">Produkt erfassen</p>
+      <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+        Das haben wir dich damals gefragt. Nachtragen kannst du es mit wieder freigeschaltetem Chat.
+      </p>
     </div>
   )
 }

@@ -141,6 +141,7 @@ function baseDeps(overrides: Partial<ScanResolveRouteDeps> = {}): ScanResolveRou
     loadPresentationRows: async () => [presentationRow, alternativePresentationRow],
     resolvePaidAccess: async () => "denied",
     hasUsedFreeReveal: async () => false,
+    autoSaveScanWishlist: async () => {},
     after: () => {},
     ...overrides,
   }
@@ -271,9 +272,16 @@ test("scan resolve masking: a not_needed verdict never calls resolvePaidAccess (
   })
 })
 
-test("scan resolve masking: premium (flag on, allowed) is byte-identical to the flag-off response", async () => {
-  // Fix round 1 (F5): compare the raw response TEXT, not parsed objects — `assert.deepEqual`
-  // on parsed JSON is key-order-insensitive and doesn't actually prove byte-identity.
+test("scan resolve masking: premium (flag on, allowed) is byte-identical to the flag-off response outside of savedState", async () => {
+  // Fix round 1 (F5, this file's own prior round): compare the raw response TEXT, not
+  // parsed objects — `assert.deepEqual` on parsed JSON is key-order-insensitive and
+  // doesn't actually prove byte-identity.
+  //
+  // T16 fix round 1 (F3) note: `savedState` is now the ONE field this invariant no longer
+  // covers. Flag-on + premium + in_catalog is exactly the branch that schedules T16's
+  // auto-save, and the response is expected to reflect that predicted outcome (this exact
+  // scenario — a `null` pre-save state — is the case F3 exists to fix); flag-off never
+  // enters that branch at all. Everything else about the response stays byte-identical.
   const texts: string[] = []
   const bodies: Array<Record<string, unknown>> = []
   for (const flag of [undefined, "true"]) {
@@ -289,7 +297,17 @@ test("scan resolve masking: premium (flag on, allowed) is byte-identical to the 
       bodies.push(JSON.parse(text))
     })
   }
-  assert.equal(texts[0], texts[1])
+  const { savedState: flagOffSavedState, ...flagOffRest } = bodies[0]! as {
+    savedState: unknown
+    [key: string]: unknown
+  }
+  const { savedState: flagOnSavedState, ...flagOnRest } = bodies[1]! as {
+    savedState: unknown
+    [key: string]: unknown
+  }
+  assert.deepEqual(flagOnRest, flagOffRest)
+  assert.deepEqual(flagOffSavedState, { state: null, managedByScan: false })
+  assert.deepEqual(flagOnSavedState, { state: "merkliste", managedByScan: true })
   assert.equal(bodies[1].freeRevealAvailable, undefined)
   assert.equal(
     (bodies[1].alternatives as unknown[])[0] &&

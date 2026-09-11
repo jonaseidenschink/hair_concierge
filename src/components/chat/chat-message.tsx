@@ -32,6 +32,17 @@ interface ChatMessageProps {
   productLookupClarificationState?: ProductLookupClarificationState | null
   productIntakeOfferState?: ProductIntakeOfferState | null
   onProductIntakeSubmitted?: (patch: ProductIntakeSubmissionPatch) => void
+  /**
+   * PR5 review fix (Z4): keepsake mode — a LAPSED owner is READING their own history. The
+   * container already withholds the mutation callbacks, but the two interactive cards
+   * inside a historical message do their own writes: the clarification card's „Auswählen"
+   * called a handler that throws for this cohort, and both intake forms POST
+   * `/api/product-intake`, which answers 403. They render as static history here: the
+   * candidates and the offer stay visible, every control that would fail is gone.
+   *
+   * Defaults to `false`, so premium and flag-off render byte-identically to today.
+   */
+  keepsake?: boolean
 }
 
 /**
@@ -153,6 +164,7 @@ export function ChatMessage({
   productLookupClarificationState = null,
   productIntakeOfferState = null,
   onProductIntakeSubmitted,
+  keepsake = false,
 }: ChatMessageProps) {
   const isUser = message.role === "user"
 
@@ -268,6 +280,7 @@ export function ChatMessage({
             conversationId={message.conversation_id}
             sourceMessageId={message.id}
             persistedState={productIntakeOfferState}
+            readOnly={keepsake}
             onSubmitted={(result) =>
               onProductIntakeSubmitted?.({
                 messageId: message.id,
@@ -285,11 +298,12 @@ export function ChatMessage({
             conversationId={message.conversation_id}
             assistantMessageId={message.id}
             selectionDisabled={isStreamingMessage}
+            readOnly={keepsake}
             resolvedSelection={
               productLookupClarificationState?.resolvedSelection ?? resolvedProductLookupSelection
             }
             resolvedIntakeReview={productLookupClarificationState?.resolvedIntakeReview ?? null}
-            onSelectProduct={selectProductFromClarification}
+            onSelectProduct={keepsake ? undefined : selectProductFromClarification}
             onIntakeSubmitted={(result) =>
               onProductIntakeSubmitted?.({
                 messageId: message.id,

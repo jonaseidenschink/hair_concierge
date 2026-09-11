@@ -64,6 +64,36 @@ function createFreeUserMiddleware() {
   return createUpdateSession(dependencies)
 }
 
+const paidUserId = "44444444-4444-4444-8444-444444444444"
+
+function createPaidUserMiddleware() {
+  const fakeSupabase = {
+    auth: {
+      getUser: async () => ({
+        data: { user: { id: paidUserId, email: "paid@example.com", app_metadata: {} } },
+      }),
+    },
+    from(table: string) {
+      throw new Error(`unexpected table read: ${table}`)
+    },
+  }
+
+  const dependencies: UpdateSessionDependencies = {
+    createServerClient: (() =>
+      fakeSupabase) as unknown as UpdateSessionDependencies["createServerClient"],
+    hasCurrentAppAccess: (async () => true) as UpdateSessionDependencies["hasCurrentAppAccess"],
+    hasCurrentPaidAppAccess: (async () =>
+      true) as UpdateSessionDependencies["hasCurrentPaidAppAccess"],
+    resolveOneTimeAccessState: (async () =>
+      "none") as UpdateSessionDependencies["resolveOneTimeAccessState"],
+    resolveModeratorAccess: (async () =>
+      "none") as UpdateSessionDependencies["resolveModeratorAccess"],
+    getRouteEnvironment: () => ({ nodeEnv: "test", localDevLoginEnabled: false }),
+  }
+
+  return createUpdateSession(dependencies)
+}
+
 async function withFlagOn(fn: () => Promise<void>) {
   const original = process.env.FREEMIUM_SCANNER_FIRST_ENABLED
   process.env.FREEMIUM_SCANNER_FIRST_ENABLED = "true"
@@ -82,6 +112,33 @@ test("flag on: a free authenticated user is still denied /api/profile (non-admit
     )
     assert.equal(response.status, 403)
     assert.deepEqual(await response.json(), { error: "subscription_required" })
+  })
+})
+
+/**
+ * T15 (freemium-scanner-first PR5): the profile page's Haar-Check corner lock relies on
+ * PUT /api/profile (the route the inline quiz editor's save eventually reaches) staying
+ * premium-gated — the row above only ever exercised GET. Middleware gates the whole
+ * `/api/profile` prefix regardless of method (matrix note: "method-agnostic"), but this is
+ * the first test that actually proves PUT, not just GET.
+ */
+test("flag on: a free authenticated user is still denied PUT /api/profile (non-admitted, subscription_required)", async () => {
+  await withFlagOn(async () => {
+    const response = await createFreeUserMiddleware()(
+      new NextRequest("https://chaarlie.de/api/profile", { method: "PUT" }),
+    )
+    assert.equal(response.status, 403)
+    assert.deepEqual(await response.json(), { error: "subscription_required" })
+  })
+})
+
+test("flag on: a paid authenticated user reaches PUT /api/profile unchanged", async () => {
+  await withFlagOn(async () => {
+    const response = await createPaidUserMiddleware()(
+      new NextRequest("https://chaarlie.de/api/profile", { method: "PUT" }),
+    )
+    assert.equal(response.status, 200)
+    assert.equal(response.headers.get("location"), null)
   })
 })
 

@@ -41,7 +41,11 @@ import { maskScanVerdictPayload, type ScanMaskedVerdictResult } from "@/lib/scan
 import { loadScanEvaluationContext } from "@/lib/scan/profile-context"
 import { buildScanVerdict } from "@/lib/scan/resolve-verdict"
 import { createScanRoute, parseJsonBody, scanFail, scanOk } from "@/lib/scan/route"
-import { loadScanSavedState } from "@/lib/scan/saved-state"
+import {
+  autoSaveScanWishlistProduct,
+  loadScanSavedState,
+  type ScanSavedStatePayload,
+} from "@/lib/scan/saved-state"
 import type { ScanResolveResult, ScanResolvedVerdictResult } from "@/lib/scan/types"
 import { SCAN_PENDING_SUBMISSION_HEADLINE } from "@/lib/scan/verdict-labels"
 import { captureScanException } from "@/lib/observability/scan"
@@ -108,6 +112,18 @@ export type ScanResolveRouteDeps = {
   /** T7 accessor, called with the admin `client` already in scope — never a user-scoped
    * client, or RLS hides the row and this reports "unused" forever. */
   hasUsedFreeReveal: typeof hasUsedFreeReveal
+  /**
+   * T16: every successful PREMIUM scan of an `in_catalog` product auto-saves it to the
+   * Merkliste, insert-only (see the doc comment on `autoSaveScanWishlistProduct` for why
+   * this is never `moveScanSavedProduct`). Called only from inside the same
+   * `isFreemiumScannerFirstEnabled() && eligibleVerdict.kind === "in_catalog"` branch that
+   * `resolvePaidAccess` already gates on — flag-off, a free/masked verdict, and a
+   * `not_needed` result never call this, matching the masking block's own byte-identity
+   * invariant. Best-effort: a write failure here is caught and reported (see the call site)
+   * rather than turning an otherwise-successful resolve into a 5xx — the user's verdict is
+   * not allowed to depend on a Merkliste write succeeding.
+   */
+  autoSaveScanWishlist: typeof autoSaveScanWishlistProduct
   captureScanException?: typeof captureScanException
   /**
    * Injection seam for Next's `after`, which throws outside a request scope. Tests pass a
@@ -419,6 +435,9 @@ export function createScanResolveRouteHandler(deps: ScanResolveRouteDeps) {
         eligibleVerdict.kind === "in_catalog" && eligibleVerdict.verdict === "unknown"
           ? "verdict_unknown"
           : "resolved"
+      // T16 fix round 1 (F3): defaults to the pre-save read; the auto-save branch below
+      // updates it to the predicted post-save state when it schedules a write.
+      let responseSavedState: ScanSavedStatePayload = savedState
 
       // Freemium scanner-first (T8): masking only ever applies to an `in_catalog`
       // verdict's alternatives, and only with the flag on — flag-off or a `not_needed`
@@ -454,13 +473,57 @@ export function createScanResolveRouteHandler(deps: ScanResolveRouteDeps) {
           completeAttempt(resolvedOutcome(), null)
           return scanOk(maskedResult)
         }
+
+        // T16: a successful PREMIUM scan of an in-catalog product auto-saves to the
+        // Merkliste — insert-only, idempotent, never the move endpoint (see the doc
+        // comment on `autoSaveScanWishlistProduct`/the dep above for THE hazard this
+        // avoids). Best-effort: a write failure here must not turn an otherwise-resolved
+        // verdict into a 5xx, so it is caught and reported rather than rethrown.
+        //
+        // T16 fix round 1 (F5): deferred through the route's existing `after()` seam
+        // (the same one attempt telemetry already uses above) instead of an inline
+        // `await` on the response's critical path — a Merkliste write has no reason to add
+        // a DB round trip to every premium verdict's latency.
+        try {
+          runAfter(async () => {
+            try {
+              await deps.autoSaveScanWishlist(client, userId, productId)
+            } catch (autoSaveError) {
+              ;(deps.captureScanException ?? captureScanException)(autoSaveError, {
+                route: "resolve",
+                status: 200,
+                reason: "scan_wishlist_auto_save_failed",
+                userId,
+                level: "warning",
+              })
+            }
+          })
+        } catch (schedulingError) {
+          // `after()` throws synchronously when there is no request store or `waitUntil`
+          // (mirrors `scheduleAttemptWrite`'s own guard above) — scheduling failure must
+          // stay fail-open, never turn an otherwise-resolved scan into a 503.
+          console.warn("[scan] auto-save scheduling failed", schedulingError)
+        }
+
+        // T16 fix round 1 (F3): the deferred write above has not run yet when this
+        // response is built, so the `savedState` read earlier (before this branch) cannot
+        // reflect it — serving it unchanged made the client show "not saved" on the same
+        // response whose badge count already includes this product. Predict the outcome
+        // instead of a second DB round trip: `autoSaveScanWishlistProduct` only ever moves
+        // a `null` state to `merkliste` (F2's ownership skip above keeps a `routine` state
+        // exactly as it is, and a state that is already `merkliste` is untouched by
+        // `ON CONFLICT DO NOTHING`) — so a `null` pre-save state is the only case this
+        // response needs to update.
+        if (savedState.state === null) {
+          responseSavedState = { state: "merkliste", managedByScan: true }
+        }
       }
 
       const result: ScanResolvedVerdictResult = {
         ...presentScanVerdictPayload(eligibleVerdict, presentationRows),
         product: productHeader,
         snapshotSource: context.snapshotSource,
-        savedState,
+        savedState: responseSavedState,
       }
       completeAttempt(resolvedOutcome(), null)
       return scanOk(result)
@@ -547,6 +610,7 @@ export const POST = createScanResolveRouteHandler({
   loadPresentationRows,
   resolvePaidAccess: resolvePaidAccessForCurrentUser,
   hasUsedFreeReveal,
+  autoSaveScanWishlist: autoSaveScanWishlistProduct,
 })
 
 /**

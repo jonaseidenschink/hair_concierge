@@ -7,6 +7,7 @@ import {
   hasCompletedQuizDiagnostics,
   type PersistedQuizDiagnosticsProfile,
 } from "@/lib/quiz/completion"
+import { hasPersonalPlanKeepsakeEvidenceForUser } from "@/lib/personal-plan/keepsake-content"
 import { createClient } from "@/lib/supabase/server"
 import { isPersonalPlanFieldTestGuest } from "@/lib/supabase/middleware"
 
@@ -170,3 +171,68 @@ export async function loadAuthenticatedAppPageTier(): Promise<EntitlementTier> {
 
 /** PR2 name for the route-agnostic loader above. */
 export const loadScanPageTier = loadAuthenticatedAppPageTier
+
+/**
+ * T17 (freemium-scanner-first PR5): the third state the two-valued tier cannot express.
+ *
+ * - `"premium"` — current paid access (and every flag-off request, with zero lookups).
+ * - `"lapsed"` — the paid-access composite denies, but this user demonstrably HELD paid
+ *   access: they left a paid-era artifact behind — a plan/enrollment row, their own
+ *   `scan_wishlist` rows, or their own chat conversations (PR5 review fix Z2, see
+ *   `hasPersonalPlanKeepsakeEvidence` in `personal-plan/keepsake-content.ts`; an accepted
+ *   Routine version alone missed legacy subscribers and incomplete provisioning).
+ *   Their own profile, Routine, Anwendung and Merkliste stay READABLE (keepsake) — each
+ *   surface showing its honest empty state where the user has nothing there; every
+ *   mutation stays premium and opens the Premium sheet.
+ * - `"free"` — denied and no keepsake evidence: today's T12 „Beispiel" behaviour, unchanged.
+ *
+ * Fail-closed in both directions, mirroring the conventions already established here:
+ * a tier-lookup failure resolves `"premium"` (never a free surface for a paying user —
+ * same rule as `resolveAuthenticatedAppPageTier` and `shouldRenderGatedExample`), and a
+ * KEEPSAKE-lookup failure resolves `"free"` (today's behaviour for a composite-denied
+ * user — a keepsake read is never granted on an unreadable signal).
+ */
+export type AuthenticatedAppAccessState = "premium" | "lapsed" | "free"
+
+export type AuthenticatedAppAccessStateDependencies = {
+  loadTier: () => Promise<EntitlementTier>
+  getUserId: () => Promise<string | null>
+  hasKeepsakeContent: (userId: string) => Promise<boolean>
+}
+
+export async function resolveAuthenticatedAppAccessState(
+  deps: AuthenticatedAppAccessStateDependencies,
+): Promise<AuthenticatedAppAccessState> {
+  let tier: EntitlementTier
+  try {
+    tier = await deps.loadTier()
+  } catch {
+    return "premium"
+  }
+  if (tier !== "free") return "premium"
+
+  try {
+    const userId = await deps.getUserId()
+    if (!userId) return "free"
+    return (await deps.hasKeepsakeContent(userId)) ? "lapsed" : "free"
+  } catch {
+    return "free"
+  }
+}
+
+/**
+ * Flag off short-circuits to `"premium"` before any client is created — the same
+ * cost-identity guarantee `loadAuthenticatedAppPageTier` carries, so a flag-off render
+ * performs neither the tier composite nor the keepsake read.
+ */
+export async function loadAuthenticatedAppAccessState(): Promise<AuthenticatedAppAccessState> {
+  if (!isFreemiumScannerFirstEnabled()) return "premium"
+  const supabase = await createClient()
+  return resolveAuthenticatedAppAccessState({
+    loadTier: loadAuthenticatedAppPageTier,
+    getUserId: async () => (await supabase.auth.getUser()).data.user?.id ?? null,
+    // PR5 review fix (Z2): ANY paid-era artifact, not only an accepted Routine version —
+    // see `hasPersonalPlanKeepsakeEvidence` for the ruling and the cohorts it recovers.
+    hasKeepsakeContent: hasPersonalPlanKeepsakeEvidenceForUser,
+  })
+}

@@ -1,5 +1,7 @@
 "use client"
 
+import { useRouter } from "next/navigation"
+
 import { ScanFlow } from "@/components/scan/scan-flow"
 import type { EntitlementTier } from "@/lib/entitlements"
 import { scanAnalytics } from "@/lib/scan/scan-analytics"
@@ -14,9 +16,25 @@ import { scanAnalytics } from "@/lib/scan/scan-analytics"
  * from inside client-side JS, the same way `plan-start-flow.tsx` passes
  * `stage3BaselineAnalytics` to `Stage3ProductsFlow`.
  *
- * `tier` (fix round 1, F1) is a plain serializable value, so `page.tsx` — the Server
- * Component — hands it straight through; only the analytics PORT needed this boundary.
+ * `tier`/`merklisteEnabled` (fix round 1, F1; T16) are plain serializable values, so
+ * `page.tsx` — the Server Component — hands them straight through; only the analytics PORT
+ * and the router (T16's `navigate` DI seam, so `ScanFlow` never calls `useRouter()` itself
+ * — see that prop's doc comment) needed this client boundary.
  */
-export function ScanPageClient({ tier }: { tier: EntitlementTier }) {
-  return <ScanFlow analytics={scanAnalytics} tier={tier} />
+export function ScanPageClient({
+  tier,
+  merklisteEnabled,
+}: {
+  tier: EntitlementTier
+  merklisteEnabled: boolean
+}) {
+  const router = useRouter()
+  return (
+    <ScanFlow
+      analytics={scanAnalytics}
+      tier={tier}
+      merklisteEnabled={merklisteEnabled}
+      navigate={router.push}
+    />
+  )
 }

@@ -120,6 +120,47 @@ function parseSavedState(payload: unknown): ScanSavedStatePayload {
   return { state, managedByScan }
 }
 
+/**
+ * Freemium scanner-first (T16): every successful PREMIUM scan of an in-catalog product
+ * auto-saves it to the Merkliste. This is deliberately NOT `moveScanSavedProduct` — THE
+ * hazard this task exists to avoid: that RPC has MOVE semantics (destination write PLUS
+ * source cleanup) and its `routine` destination DELETEs the product's `scan_wishlist` row,
+ * while its `merkliste` destination is fine but the function as a whole is the wrong tool
+ * for a background auto-save that must never remove anything. Auto-save is insert-only,
+ * into `scan_wishlist` alone, full stop — it never reads or writes `user_products`.
+ *
+ * Idempotent by construction: `scan_wishlist`'s `UNIQUE (user_id, product_id)` constraint
+ * (migration 20260820100200) plus `ignoreDuplicates` turns a rescan into a plain
+ * `ON CONFLICT (user_id, product_id) DO NOTHING` — no duplicate row, no error, and (unlike
+ * the move RPC) nothing else in the schema is ever touched by this call.
+ *
+ * Fix round 1 (F2, controller ruling): auto-saving a product the user already OWNS
+ * (`user_products`) broke the exclusivity `scan_move_saved_product`'s own migration
+ * documents — a wishlist row for an owned product made `loadScanSavedState` (wishlist-first)
+ * report "merkliste" instead of "routine" from the very next scan onward, and once the
+ * „Gemerkt" section existed the same product would show in BOTH lists. This does one
+ * indexed lookup against `user_products` before the insert and skips the write when the
+ * product is already owned — kept in the same request path (not a separate deferred check),
+ * a race against a concurrent ownership change is accepted: `ON CONFLICT DO NOTHING` and the
+ * move endpoint's own semantics bound the damage either way.
+ */
+export async function autoSaveScanWishlistProduct(
+  client: SupabaseClient,
+  userId: string,
+  productId: string,
+): Promise<void> {
+  const owned = await loadOwnedRoutineRows(client, userId, productId)
+  if (owned.length > 0) return
+
+  const { error } = await client
+    .from("scan_wishlist")
+    .upsert(
+      { user_id: userId, product_id: productId },
+      { onConflict: "user_id,product_id", ignoreDuplicates: true },
+    )
+  if (error) throw new Error("scan_wishlist_auto_save_failed")
+}
+
 /** Every `scan_wishlist` row belongs to the scan surface, so this can never be refused. */
 export async function removeScanWishlistProduct(
   client: SupabaseClient,

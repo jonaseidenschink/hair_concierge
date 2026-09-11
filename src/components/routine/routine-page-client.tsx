@@ -6,6 +6,7 @@ import { MessageCircle, RefreshCw, SlidersHorizontal } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/providers/toast-provider"
+import { GemerktSection } from "@/components/routine/gemerkt-section"
 import { launchRoutineChatTrigger, type RoutineChatTriggerType } from "@/lib/routines/chat-triggers"
 import type { RoutineUiCard, RoutineUiShape } from "@/lib/routines/types"
 import type { HairProfile } from "@/lib/types"
@@ -49,7 +50,17 @@ async function readError(response: Response, fallback: string): Promise<string> 
   }
 }
 
-export function RoutinePageClient() {
+export function RoutinePageClient({
+  merklisteEnabled = false,
+}: {
+  /**
+   * T16: server-derived freemium-flag gate for the „Gemerkt" section (see `RoutinePage`'s
+   * doc comment) — never a client flag read. Defaults to `false` so every existing caller
+   * of `<RoutinePageClient />` (this file's own legacy render, the source-pattern tests)
+   * stays on today's exact behavior: no section, no `/api/scan/wishlist` fetch at all.
+   */
+  merklisteEnabled?: boolean
+} = {}) {
   const router = useRouter()
   const { toast } = useToast()
   const [routine, setRoutine] = useState<RoutineUiShape>(EMPTY_ROUTINE)
@@ -382,6 +393,11 @@ export function RoutinePageClient() {
               ))}
             </section>
           )}
+
+          <GemerktSection
+            merklisteEnabled={merklisteEnabled}
+            onGraduated={() => void refreshRoutine()}
+          />
         </div>
       </main>
       <RoutineDrawer

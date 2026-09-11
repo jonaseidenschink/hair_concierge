@@ -27,6 +27,13 @@ type ProductLookupClarificationCardProps = {
     submissionId: string | null
     matchedProductId: string | null
   }) => void
+  /**
+   * PR5 review fix (Z4): keepsake history. The candidates stay visible — they are part of
+   * the conversation the user is re-reading — but „Auswählen" is inert and the
+   * „none"-action intake form (a `POST /api/product-intake`, 403 for this cohort) is not
+   * offered at all. Defaults to `false`: premium and flag-off are unchanged.
+   */
+  readOnly?: boolean
 }
 
 export function ProductLookupClarificationCard({
@@ -38,6 +45,7 @@ export function ProductLookupClarificationCard({
   resolvedSelection = null,
   resolvedIntakeReview = null,
   onIntakeSubmitted,
+  readOnly = false,
 }: ProductLookupClarificationCardProps) {
   const [showIntake, setShowIntake] = useState(false)
   const [selectingProductId, setSelectingProductId] = useState<string | null>(null)
@@ -63,6 +71,7 @@ export function ProductLookupClarificationCard({
   )
 
   const canSelect =
+    !readOnly &&
     Boolean(onSelectProduct) &&
     Boolean(conversationId) &&
     Boolean(assistantMessageId) &&
@@ -182,7 +191,7 @@ export function ProductLookupClarificationCard({
         </p>
       ) : null}
 
-      {!hasLockedSelection ? (
+      {!hasLockedSelection && !readOnly ? (
         <Button
           type="button"
           variant="ghost"
@@ -195,7 +204,7 @@ export function ProductLookupClarificationCard({
         </Button>
       ) : null}
 
-      {showIntake && !hasLockedSelection ? (
+      {showIntake && !hasLockedSelection && !readOnly ? (
         <div className="mt-3">
           <ProductIntakeCard
             offer={clarification.none_action.product_intake_offer}
