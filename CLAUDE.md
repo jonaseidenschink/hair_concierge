@@ -6,12 +6,12 @@
 [$wayfinder ->] worktree:new -> plan-hardening-loop -> implementation-loop (ready-check -> request-code-review) -> ship-it -> merge -> worktree:finish
 ```
 
-This is the repo's canonical loop, shared with Codex. Each stage's contract of record is `.agents/skills/<name>/SKILL.md` — read it when entering the stage. Claude-side execution of each stage:
+This file adapts the shared `AGENTS.md` workflow to Claude's tools. Its Claude-specific session/tool instructions do not govern Codex. Current repository contracts take precedence over dated workflow memories. This is the repo's canonical loop, shared with Codex. Each stage's contract of record is `.agents/skills/<name>/SKILL.md` — read it when entering the stage. Claude-side execution of each stage:
 
 - **`$wayfinder`** — explicit-only pre-planning for open-ended work; read its SKILL.md when Nick invokes it.
-- **`plan-hardening-loop`** — run via Plan Mode + the User-Facing Planning Gates below. The stage ends only with current, confirmed decision coverage and an approved implementation handoff (for user-facing work: confirmed evidence review + journey sign-off).
+- **`plan-hardening-loop`** — run via Plan Mode + the User-Facing Planning Gates below. Creation or hardening ends with current, confirmed decision coverage and an approved implementation handoff (for user-facing work: confirmed evidence review + journey sign-off). Review-only requests end with findings and missing gates.
 - **`implementation-loop`** — enforce the decision-coverage intake gate, then execute via `executing-plans` / `subagent-driven-development`, `branch-gate` first.
-- **`ready-check`** — repo, decision-coverage, and user-flow verification on the exact tree to be reviewed: `npm run ci:verify` + drive the affected flow (see "Finishing a Feature Branch" steps 1 and 4).
+- **`ready-check`** — repo, decision-coverage, and user-flow verification on the exact tree to be reviewed: run the checks appropriate to the approved change and observe the affected flow when one changes; reuse applicable evidence under `ready-check`. Documentation-only changes need instruction/metadata/reference validation, not an application build.
 - **`request-code-review`** — the single review router; on the Claude side this is the Codex whole-branch review ("Finishing a Feature Branch" step 2). One counterpart lane, no stacked reviewers.
 - **`ship-it`** — the `/ship` agent: publish-only (commit, push, PR). Skip re-running verification `/ship` would duplicate on an unchanged tree.
 - **`merge` / `worktree:finish`** — the "merge it" flow in "Ship Workflow"; merge is separate authorization from shipping.
@@ -20,20 +20,11 @@ This is the repo's canonical loop, shared with Codex. Each stage's contract of r
 
 ## Plan Mode
 
-When entering plan mode for any task:
+Inspect the task context first. For plan creation or hardening, follow `plan-hardening-loop`; for a review-only request, finish with findings and missing implementation gates rather than starting a new approval interview.
 
-1. **Options first** — Before writing a detailed plan, present 2-3 distinct implementation approaches as a comparison table:
+Present 2-3 similarly scoped options only for a meaningful unresolved fork. Recommend a direction from evidence and ask only when the remaining choice is consequential. Do not ask the user to choose routine implementation details.
 
-   | Approach | Complexity   | Effort | Tradeoffs | Best when... |
-   | -------- | ------------ | ------ | --------- | ------------ |
-   | A: Name  | Low/Med/High | ~X hrs | Pro / Con | condition    |
-   | B: Name  | ...          | ...    | ...       | ...          |
-
-2. **Let the user choose** — Use `AskUserQuestion` with the approaches as options. Include a short recommendation if one approach is clearly better.
-
-3. **Check decision coverage** — Track status `pending` or `confirmed` and separate `Confirmed with Nick`, `Inherited from evidence or contract`, `Implementation defaults`, and `Open consequential assumptions`. A choice is consequential when another choice could change user-visible behavior, product semantics, scope, data ownership, access or payment, rollout, recoverability, or material risk. Ask about those choices; keep routine internals out. Coverage is `confirmed` only after Nick sees the current record, every consequential choice affecting the handoff is settled, he explicitly acknowledges each remaining choice parked with its affected work out of scope, and the record states `Undiscussed consequential assumptions affecting this handoff: none`.
-
-4. **Then plan** — Create or reuse the task worktree, then write the chosen plan under `plans/`. Do not include rejected approaches.
+Use the decision-coverage record and acknowledgement rules in `plan-hardening-loop`. An explicit request for bounded non-user-facing work can authorize execution without a second acknowledgement when no consequential choice remains. Preserve the original user approval and scope; record internal revalidation separately. Create or reuse the task worktree before writing the chosen plan under `plans/`.
 
 Quick audits, questions, queue/status passes, tiny non-user-facing fixes, and routine non-user-facing automation runs may skip the options comparison and decision-coverage checkpoint unless evidence exposes a consequential choice. "Tiny" means mechanically bounded work that cannot affect a consequential category above; line count alone does not make a change tiny. User-facing work still requires decision coverage plus the mockup and journey gates below even when the eventual code diff is small.
 
@@ -48,7 +39,7 @@ Before any user-facing implementation:
 5. Translate the final design into a concrete user journey: entry state, ordered user actions and system responses, meaningful variants, error/recovery states, and completion.
 6. Revalidate and present the final decision-coverage record with the journey, then obtain explicit sign-off. Earlier general plan approval does not satisfy the evidence or journey gate, and sign-off is invalid while an open or undiscussed consequential assumption affects the handed-off scope.
 
-For plan-backed work, do not invoke `executing-plans` or `subagent-driven-development` until the relevant user, operator, or integration journey sign-off is confirmed, decision coverage is current and `confirmed`, and no consequential assumption affects the handed-off scope. User-facing work also waits for confirmed evidence review. Clearly bounded non-trivial non-user-facing work without a durable plan uses the equivalent compact coverage in its implementation contract. The quick-work exemption above remains conditional on no consequential choice surfacing. Purely non-user-facing work may skip user-facing evidence only when the plan explicitly states that no surface, copy, timing, or user-visible feedback changes.
+Before implementation, follow the current `implementation-loop` intake. User-facing work requires confirmed evidence review and user-journey sign-off. For internal work, the approved implementation contract suffices unless an operator/integration interaction introduces a consequential choice absent from that contract. State that no surface, copy, timing, or user-visible feedback changes. Pause only work dependent on unresolved choices; continue independent authorized work. The quick-work exemption above remains conditional on no consequential choice surfacing.
 
 ## Branch Gate
 
@@ -60,7 +51,7 @@ The repo's workflow contracts live in `.agents/skills/<name>/SKILL.md` (Codex-si
 
 ## Multi-Model Orchestration
 
-The main interactive session (intended: Fable 5) is the orchestrator: it decomposes work into small, independent, specifiable units and dispatches each to the cheapest model that can do it well. The main session stays lean — it plans, routes, integrates, and reviews; it does not personally do execution volume.
+The main interactive session (intended: Fable 5) is the orchestrator: it owns decomposition and routes independently executable work to a suitable model. Keep small or tightly coupled execution in the main session. Delegate bounded independent work when parallelism or moving noisy exploration out of context materially helps; do not delegate merely to keep the main session free of implementation.
 
 **Execution routing (Agent tool, `model` override):**
 
@@ -120,7 +111,7 @@ The main interactive session (intended: Fable 5) is the orchestrator: it decompo
 
 When all tasks on a worktree/feature branch are complete, follow this order before pushing:
 
-1. **Verify** — `npm run ci:verify` passes (typecheck + lint + build)
+1. **Verify** — follow `ready-check` and the approved verification scope. For application changes run the relevant repository checks, including `npm run ci:verify` where required; for instruction-only changes validate the instructions, metadata, references, and behavioral boundaries. Reuse applicable recorded proofs while checking the final proposed tree.
 2. **Codex review** — Fetch the latest remote refs, then invoke the `codex:codex-rescue` agent (via the Agent tool with `subagent_type: "codex:codex-rescue"`) on the full branch diff (`git diff origin/main...HEAD`) with an explicit `read-only, review only, do not edit files` brief and no `--write`. Do NOT use the `/codex:rescue` skill — it has been observed stalling silently. This step catches integration-level issues (wrong API flags, outdated library patterns, cross-file problems) that per-task reviews miss.
 3. **Fix findings** — Address any real issues Codex found. Skip false positives.
 4. **Resolve artifacts** — Commit, archive, or discard every task-owned artifact.
@@ -130,12 +121,10 @@ When all tasks on a worktree/feature branch are complete, follow this order befo
 
 Standard finish command: use the `/ship` agent when implementation is done.
 
-- Runs: type check → build → simplify → review → **confirm with user** → commit & push
-- Pre-commit hooks catch lint/type errors on every commit
-- CI runs on every PR as a required check before merge
-- PRs use squash-merge to keep main history clean
-- Override confirmation with `--yes` flag when needed
-- Before calling `/ship`, verify your changes work end-to-end (run the app, test the flow manually or via Playwright)
+- `/ship` applies `.agents/skills/ship-it/SKILL.md`: validate matching verification/review receipts and publication authority, then commit, push, and create the draft PR.
+- Do not simplify reviewed code, stack reviewers, or repeat valid checks during publishing. Missing/stale evidence returns to its owning verification/review workflow.
+- The explicit shipping request authorizes those actions without another confirmation; pre-commit hooks and required CI remain in force.
+- Report real blockers without resetting or unstaging unrelated work.
 
 `/ship` remains publish-only. After it returns a PR, a later explicit **“merge it”** authorizes verified-head squash merge plus guarded cleanup of that exact task:
 
@@ -148,5 +137,5 @@ Standard finish command: use the `/ship` agent when implementation is done.
 
 ## Session Start
 
-- Run `/checkin` at the start of each session to review priorities and plan the day's work
-- If the dev server is running, consider running `npm run test:chat` to catch any regressions early
+- Use `/checkin` when Nick asks for daily priorities or a check-in; do not prepend it to unrelated tasks.
+- A running dev server alone is not a reason to run chat evaluations. Run them when the changed behavior or requested verification requires them.

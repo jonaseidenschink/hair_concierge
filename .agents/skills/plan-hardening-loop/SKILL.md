@@ -1,6 +1,6 @@
 ---
 name: plan-hardening-loop
-description: Use for Hair Concierge when the user wants to create, grill, harden, or review a non-trivial implementation plan, compare meaningful architecture or UX options, create mockups or conditional runnable prototypes for user-facing work, obtain a counterpart-model review, align consequential decisions, or continue from a Wayfinder handoff. Every plan ends only with current confirmed decision coverage and an approved implementation handoff; user-facing work also requires evidence review and explicit user-journey sign-off. Use `$wayfinder` first only when Nick explicitly invokes it and dependent decisions prevent an implementation outcome or scope from being stated. Use implementation-loop for execution.
+description: Create or harden a Hair Concierge implementation plan through consequential decisions, evidence, and review. For review-only requests, return findings and missing gates without requiring implementation approval.
 ---
 
 # Plan Hardening Loop
@@ -9,7 +9,8 @@ Turn fuzzy intent or an existing plan into one chosen, evidence-grounded impleme
 
 ## Boundary
 
-- This skill owns discovery, options, decisions, user-facing evidence, plan writing, counterpart review, user-journey sign-off, and revision.
+- For plan creation or hardening, this skill owns discovery, options, decisions, user-facing evidence, plan writing, counterpart review, user-journey sign-off, and revision.
+- For review-only requests, inspect the requested plan and relevant evidence, then return findings, unresolved choices, and missing implementation gates. Completing the assessment does not require revising the plan, obtaining sign-off, or implementing it. Use counterpart review only when required by `AGENTS.md` or explicitly requested.
 - It does not implement the plan. Handoff execution to `implementation-loop`.
 - It accepts a Wayfinder handoff once the planning contract can be stated. If dependent decisions still prevent that, explain the boundary and offer explicit `$wayfinder` invocation instead of silently switching workflows.
 - Keep external evidence, internal product logic, and reconciliation separate as defined in `AGENTS.md`.
@@ -50,7 +51,7 @@ Maintain a compact decision-coverage record with four buckets:
 - **Implementation defaults:** routine technical choices with no meaningful product consequence.
 - **Open consequential assumptions:** anything not yet confirmed where another choice could change user-visible behavior, product semantics, scope, data ownership, access or payment, rollout, recoverability, or material risk. Mark each item `resolve before handoff` or `parked out of scope` and name the affected work.
 
-Track the record status as `pending` or `confirmed`. It is `confirmed` only after Nick has seen the current record, every consequential choice affecting the handed-off scope is settled, he explicitly acknowledges each remaining choice parked with its affected work out of scope, and the record states `Undiscussed consequential assumptions affecting this handoff: none`. A current record reflects the latest chosen direction, scoped tasks, evidence, and counterpart findings. Its coverage acknowledgement records when Nick last saw it and which plan revision or handoff it covers. Any material plan revision or counterpart finding that changes a consequential choice makes the record `pending` again until Nick confirms it; otherwise re-check and retain the status with an updated coverage acknowledgement.
+Track the record status as `pending` or `confirmed`. For plan-backed and user-facing work, confirmation requires Nick to have seen the record, settled every consequential choice affecting the handoff, and explicitly acknowledged any parked choice with its affected work out of scope. For clearly bounded non-user-facing work without a durable plan, an explicit request that uniquely determines the scope and leaves no consequential choice open can supply authorization: present the compact record and cite that request without asking again. In both cases state `Undiscussed consequential assumptions affecting this handoff: none`. Record the original user acknowledgement/request and its approved scope; do not rewrite its date or imply Nick saw later revisions. Separately record internal revalidation against the current plan, evidence, and findings. A new consequential choice returns dependent work to `pending`; unchanged approved choices retain their original acknowledgement.
 
 Do not treat evidence that merely supports one viable direction, a reviewer preference, or the orchestrator's recommendation as user approval of a consequential choice. Move that choice into the open bucket and ask for the decision. Do not fill the record with naming, test mechanics, or other internals that cannot change the product outcome.
 
@@ -65,7 +66,8 @@ Inherited from evidence or contract: <determining sources>
 Implementation defaults: <non-consequential choices only>
 Open consequential assumptions: <none, or explicitly acknowledged parked work>
 Undiscussed consequential assumptions affecting this handoff: <none, or list>
-Coverage acknowledgement: <when Nick saw this record; plan revision or handoff covered>
+Coverage acknowledgement: <original user acknowledgement/request and approved scope>
+Internal revalidation: <current revision/evidence checked; changes since acknowledgement>
 ```
 
 Completion criterion: every known consequential fork has a chosen direction or is explicitly marked `resolve before handoff` or `parked out of scope` with its affected work, the record is current for this planning stage, and no consequential assumption is hidden inside an implementation default.
@@ -115,13 +117,13 @@ Classify `Type` as `defect`, `tradeoff`, or `scope/product decision`. Classify `
 - Never silently accept a product, scope, architecture, or risk tradeoff on the user's behalf.
 - Rerun the counterpart only after material blocker-driven changes, multiple concrete implementation traps, or an explicit user request. Do not rerun for a cleaner approval sentence.
 
-Revalidate decision coverage after the review. A material finding that changes a consequential choice returns the record to `pending` until Nick confirms it. If findings change only technical defects or non-consequential defaults, update the record and retain `confirmed` with a current coverage acknowledgement.
+Revalidate decision coverage after the review. A material finding that changes a consequential choice returns the record to `pending` until Nick confirms it. If findings change only technical defects or non-consequential defaults, update internal revalidation and retain `confirmed` with the original user acknowledgement.
 
 Completion criterion: every material finding is classified, supported or rejected by evidence, reflected in the plan or an explicit open decision, and reconciled with current decision coverage.
 
 ## 6. Confirm the designed user journey
 
-After the plan and counterpart findings are reconciled, translate the chosen design back into the experience the user will actually have. Add or update the plan's **Designed user journey** section, then present the same journey to the user for explicit confirmation.
+For user-facing plans, after the plan and counterpart findings are reconciled, translate the chosen design back into the experience the user will actually have. Add or update the plan's **Designed user journey** section, then present the same journey to the user for explicit confirmation.
 
 Describe the journey from the user's perspective, not as an implementation checklist:
 
@@ -131,11 +133,11 @@ Describe the journey from the user's perspective, not as an implementation check
 4. meaningful variants such as entitlement, device, prior state, or user choice
 5. completion state and what the user sees or can do next
 
-Link the reviewed mockups or screenshots for every user-facing change and ensure the narrated journey matches them. Keep invisible backend work outside the journey unless it changes timing, feedback, trust, or available actions. For a feature with no end-user surface, present the equivalent operator or integration journey and state explicitly that no end-user journey changes.
+Link the reviewed mockups or screenshots for every user-facing change and ensure the narrated journey matches them. Keep invisible backend work outside the journey unless it changes timing, feedback, trust, or available actions. For work with no end-user surface, describe the operator/integration outcome in the implementation contract and state that no surface, copy, timing, or user-visible feedback changes. Request a separate walkthrough only when needed to resolve a consequential choice missing from that contract; otherwise record journey sign-off as not applicable.
 
 Present the final decision-coverage record with the journey: what Nick decided, what was inherited, which non-consequential implementation defaults remain, and which decisions are explicitly parked out of scope. Journey sign-off is invalid while an open or undiscussed consequential assumption affects the handed-off scope.
 
-Ask whether this journey exactly matches the user's intent. A general approval given before this walkthrough does not count as journey sign-off. Do not hand off to implementation while sign-off is pending.
+For user-facing work, ask whether this journey exactly matches the user's intent. A general approval before this walkthrough does not count as journey sign-off. Do not implement dependent work while a required sign-off is pending; continue independent authorized preparation.
 
 If the user corrects the journey:
 
@@ -143,11 +145,11 @@ If the user corrects the journey:
 - return to counterpart review only when the correction materially changes architecture, data flow, scope, risk, or earlier review assumptions
 - present the revised journey again and obtain explicit confirmation
 
-Completion criterion: the plan records the exact confirmed journey and marks user-journey sign-off as confirmed; no implementation-relevant journey assumption remains implicit.
+Completion criterion: the plan records the confirmed user-facing journey, or an internal outcome whose consequential choices are settled and separate sign-off is not applicable. No implementation-relevant journey assumption remains implicit.
 
 ## 7. Hand off cleanly
 
-The loop is done when the chosen direction is explicit, decision coverage is current and `confirmed`, no item remains marked `resolve before handoff`, no open or undiscussed consequential assumption affects the handoff, blockers are resolved or explicitly parked out of scope, required mockups have been reviewed, the designed user journey has explicit sign-off, the plan is executable, and verification is checkable.
+For plan creation or hardening, the loop is done when the chosen direction is explicit, decision coverage is current and `confirmed`, no item remains marked `resolve before handoff`, no open or undiscussed consequential assumption affects the handoff, blockers are resolved or explicitly parked out of scope, required mockups have been reviewed, required user-facing journey sign-off is explicit and internal outcomes have no unresolved consequential choices, the plan is executable, and verification is checkable. A review-only request instead ends with the assessment and any missing gates; it does not require implementation approval.
 
 Report:
 

@@ -18,7 +18,7 @@ Use `assets/research-template.md` as the Markdown output structure. Produce the 
 
 ## Explicit invocation gate
 
-Proceed only when the caller explicitly invoked `$prepare-content-research` or asked to use this exact skill by name. If the skill was loaded implicitly, stop and ask the caller to invoke `$prepare-content-research` with a topic or research question.
+Proceed only when the caller explicitly invoked `$prepare-content-research` or asked to use this exact skill by name. If it was loaded implicitly, do not execute this workflow; return to the caller's authorized task without asking for reinvocation.
 
 ## Workflow
 

@@ -1,6 +1,6 @@
 ---
 name: branch-gate
-description: Git branch and worktree safety gate. Use before Codex makes code edits, commits, rebases, merges, cleanup commits, or starts a new implementation task in a Git repository; use when the user asks whether to use a branch or worktree; use when a repo has dirty state, multiple local branches, stale worktrees, or PR/merge prep.
+description: Establish Git/worktree ownership before repository mutations, or inspect branch/worktree state when explicitly requested. Reuse a current gate decision until ownership or Git state changes.
 ---
 
 # Branch Gate
@@ -48,49 +48,27 @@ git pull --ff-only
 
 - **Current branch is `main` or another protected/base branch:** create or switch to a feature branch before edits unless the user explicitly asked to work on that branch.
 - **Current branch is root `main` and it is behind its upstream:** fast-forward it with `git pull --ff-only` before creating a branch or worktree, unless local uncommitted files would be overwritten.
-- **Worktree is dirty:** classify changes before editing. Continue only if the dirty changes are clearly part of the same task; otherwise commit, stash, or move to a new worktree before starting.
+- **Worktree is dirty:** classify changes before editing. Continue only if the dirty changes are clearly part of the same task; otherwise preserve them and create a separate worktree. Commit or stash unrelated changes only when explicitly authorized.
 - **User asks to start unrelated work while current branch has in-progress work:** prefer a new worktree over switching branches.
-- **One active task, clean worktree, no parallel context needed:** a normal branch is enough.
+- **New task:** follow this repository's worktree policy and `npm run worktree:new -- <slug>`; a clean checkout alone does not override the root-main/worktree boundary.
 - **Parallel feature streams, long-running experiments, PR review while preserving current state, or messy branch reconciliation:** prefer a worktree.
 - **Existing branch already matches the task:** switch to it only if the current worktree is clean or the dirty changes are safely handled.
 - **Untracked files exist:** inspect and classify them. Add ignores for repeatable local artifacts; preserve unique docs/data/code unless the user explicitly chooses deletion.
 - **Stale worktrees appear:** run `git worktree prune --dry-run --verbose` before pruning. Prune only metadata for missing paths.
-- **Branch deletion:** delete only branches confirmed merged (`git branch --merged <base>`) or patch-equivalent (`git cherry -v <base> <branch>` shows `-`). Never delete remote branches as part of routine cleanup unless explicitly requested.
+- **Branch deletion:** use the repository's guarded `worktree:finish` contract for the exact authorized merged task. Merged or patch-equivalent content alone does not establish cleanup ownership or authority; other deletion needs explicit authorization.
 
-## Branch vs Worktree Defaults
+## Repository worktree procedure
 
-Prefer a **branch** when:
+Reuse the task worktree when ownership is clear. Create a separate worktree when:
 
-- the current worktree is clean;
-- the task is the next linear piece of work;
-- the user wants one PR or one focused commit stack.
-
-Prefer a **worktree** when:
-
-- the current branch has uncommitted or partially committed work;
+- the current branch has unrelated uncommitted or partially committed work;
 - the user wants to switch to a different task without disturbing the current one;
 - a PR/review/fix should be isolated from a long-running branch;
 - you need to compare or integrate separate branches side by side.
 
-Use repo-local ignored worktrees when available:
+Use `npm run worktree:new -- <slug>` from the root checkout; let the helper enforce base freshness and setup. Do not improvise a second location or cleanup procedure when its guards refuse.
 
-```bash
-git check-ignore -q .worktrees
-git worktree add .worktrees/<slug> -b codex/<slug> origin/main
-```
-
-If the ignore check fails, use a sibling directory instead:
-
-```bash
-git worktree add ../worktrees/<repo>-<slug> -b codex/<slug> origin/main
-```
-
-Remove finished worktrees cleanly:
-
-```bash
-git worktree remove <path>
-git worktree prune
-```
+After an authorized merge, follow `AGENTS.md`'s exact `worktree:finish` procedure, including dry run, retention exceptions, and refusal handling. Do not substitute direct worktree removal or patch-equivalence for that contract.
 
 ## Sync Habit
 

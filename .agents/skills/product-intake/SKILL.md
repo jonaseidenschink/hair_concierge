@@ -14,12 +14,17 @@ payload, and only publish after explicit final approval.
 ## Required Context
 
 Before making recommendations, changing product-intake files, researching a
-product, or running commands, load the canonical runbook from the active repo or
-worktree:
+product, or running commands, identify the operating mode and load the canonical
+runbook from the active repo or worktree:
 
 ```text
 docs/product-intake-research-ops.md
 ```
+
+Read its **Which Workflow Am I In?**, **Core Rule**, **Safety Boundaries**, and
+**Two Separate Readiness States** sections, plus the section for the selected
+operating mode. Before product research or a publish/final-handoff action, read
+the complete applicable research or approval contract first.
 
 Use that document as the source of truth for:
 
@@ -62,13 +67,15 @@ is unavailable rather than improvising the workflow.
 ## Default Workflow
 
 1. Identify the active worktree and product-intake branch.
-2. Read `docs/product-intake-research-ops.md`.
+2. Classify the operating mode, then read the runbook's core, safety, readiness,
+   and mode-specific sections. Read the complete applicable research or
+   publish/final-handoff contract before performing that operation.
 3. Inspect live state:
    - review center submission page or URL, if provided
    - `product_submissions` status when DB access is available
    - `product_intake_research_jobs` / worker status when relevant
    - local package state for legacy package flow
-4. Classify exactly one operating mode:
+4. Confirm exactly one operating mode:
    - queue triage
    - new submission research
    - brand identity review
@@ -83,8 +90,8 @@ is unavailable rather than improvising the workflow.
 
 For recurring queue-triage automation runs:
 
-- begin with `products:intake:queue` and `products:intake:research-queue`
-- remain non-mutating and keep publish/apply actions human-gated
+- begin with `products:intake:queue`; use `products:intake:research-queue` only when the automation authorizes local research-package preparation
+- keep Supabase writes and publish/apply actions human-gated; the research queue runner writes local package and image-discovery files, so omit it for strictly read-only status requests
 - compare against the automation's previous state and report only new items,
   state changes, newly aged blockers, and exact later dry-run/apply commands
 - do not duplicate source, image, payload, or approval policy in the automation

@@ -1,6 +1,10 @@
 # Category definition checklist
 
-Read this checklist completely before grilling a Personal Plan category. Work through it in order, but skip a question only when repository evidence proves it already answered or non-applicable. Record why.
+Use this checklist progressively while grilling a Personal Plan category. Before
+each decision, read the relevant reconnaissance and question sections; work
+through the complete checklist and source ledger before final confirmation. Skip
+a question only when repository evidence proves it already answered or
+non-applicable, and record why.
 
 ## Contents
 
@@ -14,6 +18,12 @@ Read this checklist completely before grilling a Personal Plan category. Work th
 
 Start from the current worktree or the source branch/worktree Nick identifies. Use `rg`/`rg --files` to resolve renamed paths and inspect actual values, not summaries.
 
+Before committing a decision that affects shared ownership, replacement, day
+types, lifecycle, reconciliation, or presentation, inspect the relevant
+adjacent-category record and shared-dependency authority. If it remains
+unresolved, record it as a named dependency rather than deciding shared behavior
+locally.
+
 ### Durable Personal Plan sources
 
 - `docs/personal-plan/categories/category-design-framework.md`
@@ -21,6 +31,10 @@ Start from the current worktree or the source branch/worktree Nick identifies. U
 - `docs/personal-plan/categories/<category>/{evidence,decision}.md`
 - confirmed adjacent-category `decision.md` files
 - `plans/2026-08-02-personal-plan-app-implementation-v2.md`, or its explicitly superseding living plan, plus the current computation specification
+
+Maintain a compact source ledger as you progress: each required source, its
+relevance, whether it was consulted or unavailable, and the decision or final
+gate it supports. Complete it before final confirmation.
 
 If these are not present in the active worktree, inspect the identified source context read-only. Their absence blocks the final durable checkpoint, but this bundled checklist still governs current-repo reconnaissance and the working decision ledger without inventing answers.
 
@@ -269,5 +283,9 @@ Do not mark the category confirmed, update the living implementation checkpoint,
 - structured reason facts or required fixtures;
 - catalog facts, backfill owner, protocol data, test seam, or launch gate;
 - named shared dependencies and the stage at which each must be resolved.
+
+Before that confirmation, complete the reconnaissance/source ledger and every
+applicable checklist section. Progressive reading may support earlier questions,
+but does not waive this completeness gate.
 
 A catalog/data gap or shared dependency may remain after category confirmation only when the category rule is fully decided, the gap is explicit, its owner and blocking stage are named, and no output claims launch readiness.

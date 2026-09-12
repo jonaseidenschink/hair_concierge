@@ -24,7 +24,7 @@ Use this skill to ask the local `claude` CLI for a structured second opinion, th
 ### Plan/spec review
 
 1. Resolve the requested plan path. Plans usually live under `plans/`, but accept any markdown file the user names.
-2. The bundled script requires the reviewer to inspect Decision coverage against `.agents/skills/plan-hardening-loop/SKILL.md` and `.agents/skills/plan-hardening-loop/references/plan-format.md`, including bucket completeness, current coverage acknowledgement, hidden consequential assumptions, and any choice that still needs Nick rather than reviewer or orchestrator approval.
+2. The bundled script requires the reviewer to inspect Decision coverage against `.agents/skills/plan-hardening-loop/SKILL.md` and its plan-format reference: complete buckets, original user acknowledgement/request and approved scope, separate internal revalidation, hidden consequential assumptions, and any new choice that still needs Nick. Review is read-only and terminal; do not dispatch another reviewer.
 3. From the repository root, run the script. Repository plan reviews default to the system temporary directory; pass an output path only when the review is intentionally retained:
 
 ```bash

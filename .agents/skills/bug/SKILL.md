@@ -22,7 +22,7 @@ Read [references/case-template.md](references/case-template.md). Build the inves
 
 Check first for safety, privacy, payments, data loss, or active production harm. Preserve evidence and request containment authority before any mitigating mutation.
 
-Use `linear` to search likely duplicates. Update the canonical issue when one exists; otherwise create a symptom-titled Bug in the `Hair-concierge` team, starting in Triage when available. Set a project only when context clearly identifies one. Return the canonical issue ID.
+Use the available Linear connector to search likely duplicates; consult a Linear skill when one is available. If the connector or access is unavailable, report the actual capability/access failure rather than treating a missing named skill as the failure. Under this skill's explicit authority, update the canonical issue when one exists; otherwise create a symptom-titled Bug in the `Hair-concierge` team, starting in Triage when available. Set a project only when context clearly identifies one. Return the canonical issue ID.
 
 ## 2. Diagnose Proportionally
 

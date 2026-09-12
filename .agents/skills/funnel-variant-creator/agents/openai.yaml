@@ -1,0 +1,7 @@
+interface:
+  display_name: "Funnel Variant Creator"
+  short_description: "Build a campaign landing and offer package"
+  default_prompt: "Use $funnel-variant-creator to prepare this campaign landing and offer package for a draft PR."
+
+policy:
+  allow_implicit_invocation: true

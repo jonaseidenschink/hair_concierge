@@ -37,7 +37,7 @@ Skip it for docs/copy/comments-only changes, isolated tests, or a small localize
 
 Merge duplicates, inspect every material finding locally, reject false positives, and distinguish hard defects from design tradeoffs. Do not silently turn a reviewer's product, scope, architecture, or risk preference into the user's decision.
 
-Read all findings before editing; clarify related ambiguity before partial fixes. For proposals that expand infrastructure, abstraction, or behavior, confirm actual call sites and reject unused machinery as YAGNI. Apply supported findings in coherent, focused-check batches and record rejected or deferred rulings.
+Read all findings before editing; clarify related ambiguity before partial fixes. For proposals that expand infrastructure, abstraction, or behavior, confirm actual call sites and reject unused machinery as YAGNI. Apply supported fixes in coherent, focused-check batches only when implementation or repair is already authorized. A standalone review returns findings and does not authorize edits. Record rejected or deferred rulings.
 
 ## Refresh after findings
 

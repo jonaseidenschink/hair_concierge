@@ -9,7 +9,7 @@ Define one category as a complete, deterministic Personal Plan contract before i
 
 ## Source context
 
-Locate these sources in the active worktree or the source branch/worktree Nick identifies, then read every available source before asking Nick to define anything:
+Locate these sources in the active worktree or the source branch/worktree Nick identifies. Before each decision, read the authorities relevant to that decision and its dependencies; do not delay the first useful question for unrelated reconnaissance:
 
 - `docs/personal-plan/categories/category-design-framework.md`
 - `docs/personal-plan/categories/README.md`
@@ -18,7 +18,7 @@ Locate these sources in the active worktree or the source branch/worktree Nick i
 - `plans/2026-08-02-personal-plan-app-implementation-v2.md`, or its explicitly superseding living plan
 - current computation, lossless answer schema, questions, product inventory/pending state, catalog spec tables, application protocols, selectors, and tests
 
-Read [references/category-definition-checklist.md](references/category-definition-checklist.md) completely before the first product-decision question. Use its reconnaissance map and exact question set. Resolve current paths with `rg`; examples in the reference are discovery hints, not permanent authority.
+Use [references/category-definition-checklist.md](references/category-definition-checklist.md) progressively: start with its reconnaissance map and the next decision's question set, resolve current paths with `rg`, and complete the full checklist and source ledger before final category confirmation. Examples in the reference are discovery hints, not permanent authority.
 
 If the framework, category index, or living plan remains unavailable after checking the identified source context, use the bundled checklist as the process contract. Continue read-only reconnaissance and the one-decision-at-a-time working ledger, but treat the missing durable destination as a `category_blocker` for writing or committing the final category checkpoint. Report the missing authority and never invent a parallel architecture or convention.
 
@@ -45,10 +45,14 @@ Do not duplicate shared shopping, pending-product, versioning, confirmation, day
 ### 1. Establish current truth
 
 - Name the category, its likely adjacent categories, and the intended runtime/test seam.
-- Inspect the live/repo computation, lossless schemas, existing questions, product-state flow, catalog rows/specs, selectors, protocols, and tests.
+- Inspect the live/repo computation, lossless schemas, existing questions, product-state flow, catalog rows/specs, selectors, protocols, and tests as needed for the next decision and its dependencies. Complete the full reconnaissance before final category confirmation.
 - Build a compact `reuse / adapt / reject / missing` ledger.
 - List already-confirmed decisions so Nick is never asked to redefine them.
 - Identify evidence gaps separately from product-policy gaps. Run `hair-care-expert` only for the former.
+- Before recording a category-local decision that touches ownership, replacement,
+  day types, lifecycle, reconciliation, or presentation, inspect the relevant
+  confirmed adjacent-category record and shared-dependency authority. Defer an
+  unresolved dependency explicitly instead of committing an incompatible rule.
 
 Keep reconnaissance read-only. Do not change runtime, database, category documents, or the living plan while the category is still being grilled unless Nick explicitly changes the scope.
 
@@ -72,6 +76,10 @@ Before calling the category confirmed, make all outputs explicit:
 - **Stage 1:** why the category is included, `basis | optional | not_needed`, target product type/roles/functions, and total cadence or event frequency.
 - **Stage 2:** every owned, pending, recommended, shopping, acquired, and override product; exact role-relative fit; `ideal | supportive | mismatch | unknown`; deterministic selection, no-valid-match behavior, and explicit state transitions.
 - **Stage 3:** occurrences allocated into eligible day types; ordered application steps; wet/damp/dry state, placement, rinse/leave-in behavior, amount/time semantics, replacement/interactions, and verified exact-product protocol overrides.
+
+Complete the checklist's source ledger and final stop gate before confirming the
+category. Earlier progressive reading supports individual decisions; it does not
+waive final evidence completeness.
 
 Category computation owns total cadence. Product allocation must cover that total exactly and must not silently add occurrences. Only confirmed in-hand products compile into executable steps.
 

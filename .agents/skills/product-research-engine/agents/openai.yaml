@@ -1,0 +1,7 @@
+interface:
+  display_name: "Product Research Engine"
+  short_description: "Run formula-first product classification research"
+  default_prompt: "Use $product-research-engine to classify this product formula through the applicable category engine."
+
+policy:
+  allow_implicit_invocation: true

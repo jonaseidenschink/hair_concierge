@@ -19,11 +19,11 @@ A Goal can contain this loop. The loop does not require formal Goal mode.
 
 Read the approved plan when one exists and inspect any active goal before editing.
 
-For plan-backed work, confirm the plan's **Decision coverage** is current and `confirmed`, states `Undiscussed consequential assumptions affecting this handoff: none`, and has no open decision that the handed-off tasks depend on. "Current" means the record reflects the latest chosen direction, scoped tasks, evidence, and counterpart findings; its coverage acknowledgement names when Nick last saw it and which plan revision or handoff it covers. When a plan written before this contract is the current source for implementation or verification, refresh that active plan or its handoff before continuing, even if implementation edits are already complete; do not bulk retrofit historical plans that are not driving active work.
+For plan-backed work, confirm the plan's **Decision coverage** is current and `confirmed`, states `Undiscussed consequential assumptions affecting this handoff: none`, and has no open decision that the handed-off tasks depend on. "Current" means the record reflects the latest chosen direction, scoped tasks, evidence, and counterpart findings; its original coverage acknowledgement names the approved scope, and separate internal revalidation links that approval to the current revision without claiming a new user acknowledgement. When a plan written before this contract is the current source for implementation or verification, refresh that active plan or its handoff before continuing, even if implementation edits are already complete; do not bulk retrofit historical plans that are not driving active work.
 
-For a clearly bounded non-trivial non-user-facing change that genuinely needs no durable plan, draft the same compact coverage inline in the implementation contract, present it to Nick, and wait for explicit acknowledgement before marking it `confirmed` or making the first edit. If evidence exposes a consequential choice, return to `plan-hardening-loop`; do not self-confirm the record or continue editing while coverage is `pending`.
+For clearly bounded non-user-facing work without a durable plan, present the compact coverage and cite the explicit task request. If that request uniquely determines the scope and no consequential choice remains, mark coverage `confirmed` and proceed without a second acknowledgement. An ambiguous request, evidence favoring one of several consequential options, or silence does not supply approval. Return unresolved consequential choices to `plan-hardening-loop` and pause only dependent work.
 
-For user-facing work, also confirm **Planning evidence**, confirmed evidence review, a **Designed user journey**, and explicit user-journey sign-off. If any required gate is missing or pending, return to `plan-hardening-loop`; do not implement. A prose-only visual description or general plan approval is not a substitute. If a prototype settled a decision, confirm its finding and disposition are recorded and rewrite retained behavior through the normal production test and safeguard workflow. For non-user-facing work, accept an explicitly confirmed operator/integration journey plus an explicit statement that no user-facing mockup is required because no surface, copy, timing, or user-visible feedback changes.
+For user-facing work, also confirm **Planning evidence**, confirmed evidence review, a **Designed user journey**, and explicit user-journey sign-off. If any required gate is missing or pending, return to `plan-hardening-loop`; do not implement. A prose-only visual description or general plan approval is not a substitute. If a prototype settled a decision, confirm its finding and disposition are recorded and rewrite retained behavior through the normal production test and safeguard workflow. For non-user-facing work, use the approved implementation contract and state that no surface, copy, timing, or user-visible feedback changes. A separate operator/integration walkthrough is required only to settle a consequential choice absent from that contract.
 
 Use formal Goal mode only when the user explicitly asks for it and the work is likely to span multiple turns, resumptions, or a long implementation sequence. If formal Goal mode is requested, first inspect the existing goal to avoid replacing unrelated active work.
 
@@ -34,13 +34,14 @@ In every implementation-loop run, state a compact implementation contract. Forma
 ```text
 Outcome: <user-visible or repository state that must become true>
 Scope: <plan path and boundaries>
-Decision coverage: <confirmed from the plan | pending until Nick acknowledges on the no-plan path, then confirmed before first edit>
+Decision coverage: <confirmed from approved plan or explicit bounded internal-work request | pending for unresolved consequential choices>
 Confirmed with Nick: <plan section or consequential choices>
 Inherited from evidence or contract: <plan section or determining sources>
 Implementation defaults: <plan section or non-consequential choices only>
 Open consequential assumptions: <none, or acknowledged parked work>
 Undiscussed consequential assumptions affecting this handoff: <none, or list>
-Coverage acknowledgement: <when Nick saw this record; plan revision or handoff covered>
+Coverage acknowledgement: <original user acknowledgement/request and approved scope>
+Internal revalidation: <current revision/evidence checked; changes since acknowledgement>
 Verification: <proof required>
 Stop: <last authorized external action>
 ```
@@ -70,7 +71,7 @@ Follow the plan in dependency order. For each slice:
 
 When changing deterministic behavior or regression guards, read `references/test-first-quality.md` and record the red proof.
 
-Return to planning only when evidence reveals a product decision, material architecture change, scope expansion, or risk acceptance that the approved plan did not settle. Immediately mark decision coverage `pending`; do not continue the affected work until `plan-hardening-loop` has resolved or explicitly parked the choice and restored current confirmed coverage.
+Return to planning only when evidence reveals a product decision, material architecture change, scope expansion, or risk acceptance that the approved plan did not settle. Mark dependent work's decision coverage `pending`; continue independent authorized work, but do not continue the affected work until `plan-hardening-loop` has resolved or explicitly parked the choice and restored current confirmed coverage.
 
 Completion criterion: every in-scope plan item is implemented or explicitly blocked, with no unrelated edits absorbed and every task-owned artifact classified as commit, archive, or discard.
 
@@ -82,7 +83,7 @@ Create a verification receipt containing:
 
 - branch and base
 - the canonical content fingerprint from `ready-check`
-- revalidated decision-coverage status and coverage acknowledgement
+- revalidated decision-coverage status, original acknowledgement, and internal revalidation
 - commands and outcomes
 - manual or browser evidence
 - artifact disposition and unresolved task-owned files

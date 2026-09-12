@@ -21,7 +21,7 @@ Skip Wayfinder and use `plan-hardening-loop` when a few grilling questions or on
 
 ## 2. Create or recover the map
 
-Use the `linear` skill. Read existing issues first and confirm the team, project, and identifiers. If Linear is unavailable, stop before creating a shadow tracker and ask Nick to connect it.
+Use the available Linear connector; consult a Linear skill when one is available. Read existing issues first and confirm the team, project, and identifiers. If the connector or access is unavailable, stop before creating a shadow tracker and report the actual capability/access failure to Nick.
 
 Draft the map in conversation before mutating Linear:
 

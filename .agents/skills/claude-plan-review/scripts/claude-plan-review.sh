@@ -95,11 +95,12 @@ $repo_dir
 Constraints:
 - Use the reviewing-plans skill if available.
 - Read $repo_dir/.agents/skills/plan-hardening-loop/SKILL.md and its references/plan-format.md before reviewing.
-- Inspect the plan's Decision coverage for complete buckets, a current coverage acknowledgement, hidden consequential assumptions, and choices that still require Nick's decision.
+- Inspect Decision coverage for complete buckets, the original user acknowledgement/request and approved scope, separate current internal revalidation, hidden consequential assumptions, and choices that still require a decision from Nick. Distinguish an already approved choice from a newly introduced tradeoff.
 - Do not treat evidence, reviewer preference, or the orchestrator's recommendation as Nick's approval.
 - Ground findings in the actual codebase with file:line citations.
 - Do not edit files.
 - Do not rewrite the plan.
+- This review is terminal: return your verdict without spawning or invoking another reviewer.
 - Separate hard technical defects from product, scope, architecture, or risk tradeoffs.
 - For each tradeoff, state the decision the owner must make instead of silently choosing it.
 - Return only the verdict report in Markdown.
@@ -127,6 +128,7 @@ Instructions:
 - Ground findings in actual code with file:line citations where possible.
 - Do not edit files.
 - Do not rewrite the change.
+- This review is terminal: return your verdict without spawning or invoking another reviewer.
 - Put findings first, ordered by severity.
 - Separate hard defects from maintainability or product tradeoffs.
 - Do not present a preference as a correctness finding.

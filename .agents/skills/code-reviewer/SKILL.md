@@ -9,7 +9,7 @@ description: Use when explicitly invoked or selected by request-code-review to i
 
 Perform a high-signal code review on the requested change set. Treat review as risk discovery, not polish. Start from the actual diff, read changed files in context, and surface only issues that are likely to matter in production or maintenance.
 
-When repository instructions exist, read `AGENTS.md`, `CLAUDE.md`, and other local guidance first and follow them.
+Follow applicable `AGENTS.md` instructions and local guidance governing the changed paths. Consult `CLAUDE.md` for Claude-side execution or explicitly relevant context; its tool and session procedures do not apply to Codex. Reuse instructions already loaded and unchanged in this task.
 
 ## Inputs
 

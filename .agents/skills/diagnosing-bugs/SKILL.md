@@ -53,7 +53,9 @@ Do not move on until the smallest practical repro still fails.
 
 ## Phase 3: Rank Hypotheses
 
-Generate 3-5 ranked hypotheses before testing.
+Generate the evidence-supported plausible hypotheses before testing. One is
+sufficient when the cause is already well constrained; do not invent
+alternatives merely to meet a count.
 
 Compare the broken path with its closest working sibling or prior state. Test every unexplained difference.
 
