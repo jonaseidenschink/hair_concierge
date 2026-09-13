@@ -346,8 +346,8 @@ export function ScannerOffer({
               Das ist für deine Produkte
             </p>
             <h2 className="mt-2 font-serif text-[26px] leading-[1.1] tracking-[-0.01em]">
-              Der Scanner zeigt dir, ob das Produkt bei dir zu Hause oder in der Drogerie zu deinen
-              Haaren passt.
+              Der Scanner zeigt dir, ob deine Produkte zu Hause oder in der Drogerie zu deinen
+              Haaren passen.
             </h2>
             <p className="mt-2.5 text-[15px] text-white/80">
               Handy dranhalten, eine Sekunde: passt oder passt nicht. Mit dem Grund. Und zu jedem,
