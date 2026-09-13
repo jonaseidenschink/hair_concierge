@@ -1,0 +1,334 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Chaarlie Quiz mit Probescan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap">
+<style>
+:root{
+  --paper:#FDFBF9;--card:#FFFFFF;--ink:#2A1845;--ink-2:#5B4A78;--muted:#8A7BA3;--rule:#E7E1D8;
+  --lilac:#6B50A0;--lilac-soft:#C8B8E0;--lilac-wash:#EEE9F6;--coral:#D4616A;--coral-wash:#FBE9EA;
+  --green:#3C7D5A;--green-wash:#E6F2EA;--red:#9B2C3B;
+  --f-display:"Fraunces",Georgia,serif;--f-body:"Plus Jakarta Sans",-apple-system,"Segoe UI",sans-serif;
+}
+*{box-sizing:border-box}
+html{color-scheme:light}
+body{margin:0;background:#EFEAF4;color:var(--ink);font-family:var(--f-body);font-size:16px;line-height:1.5;-webkit-font-smoothing:antialiased}
+.stage{max-width:1100px;margin:0 auto;padding:24px 20px 60px;display:grid;grid-template-columns:420px 1fr;gap:32px;align-items:start}
+@media (max-width:860px){.stage{grid-template-columns:1fr}}
+.phone{background:var(--paper);border:10px solid #1B1426;border-radius:44px;overflow:hidden;min-height:760px;position:relative;box-shadow:0 30px 60px rgba(42,24,69,.2);display:flex;flex-direction:column}
+.bar{display:flex;justify-content:space-between;font-size:12px;font-weight:600;padding:12px 24px 0}
+.screen{display:none;flex:1;flex-direction:column;padding:16px 20px 22px;animation:in .35s ease}
+.screen.on{display:flex}
+@keyframes in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.progress{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+.progress .track{flex:1;height:4px;background:var(--lilac-wash);border-radius:99px;overflow:hidden}
+.progress .track i{display:block;height:100%;background:var(--lilac);width:var(--p)}
+.progress small{font-size:12px;color:var(--muted)}
+.hint{background:var(--lilac-wash);border-radius:12px;padding:10px 12px;font-size:13px;color:var(--ink);margin-bottom:14px;display:flex;gap:8px}
+.hint b{font-weight:700}
+h1,h2{font-family:var(--f-display);font-weight:500;line-height:1.1;text-wrap:balance;margin:0;letter-spacing:-.01em}
+h1{font-size:30px}h2{font-size:24px}
+p{margin:8px 0 0;color:var(--ink-2);font-size:14.5px}
+.opts{display:grid;gap:8px;margin-top:16px}
+.opt{border:1.5px solid var(--rule);background:var(--card);border-radius:14px;padding:12px 14px;text-align:left;font:inherit;cursor:pointer;color:var(--ink)}
+.opt b{display:block;font-size:15px}.opt span{font-size:12.5px;color:var(--muted)}
+.opt.sel{border-color:var(--lilac);background:#F6F3FB}
+.opt:focus-visible{outline:2px solid var(--coral);outline-offset:2px}
+.cta{display:block;width:100%;background:var(--coral);color:#fff;text-align:center;font:inherit;font-weight:700;font-size:15px;padding:14px;border-radius:14px;margin-top:auto;border:0;cursor:pointer}
+.cta.ghost{background:transparent;color:var(--lilac);border:1.5px solid var(--lilac-soft);margin-top:8px}
+.cta.lilac{background:var(--lilac)}
+.axes{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:14px}
+.axes div{background:var(--card);border:1px solid var(--rule);border-radius:10px;padding:6px 6px;font-size:10px;color:var(--muted);text-align:center;line-height:1.2}
+.axes div b{display:block;font-size:11px;color:var(--ink);margin-bottom:2px}
+.axes div.done{border-color:var(--green);background:var(--green-wash);color:var(--green)}
+.axes div.done b{color:var(--green)}
+.toast{position:absolute;left:20px;right:20px;bottom:90px;background:var(--ink);color:#fff;border-radius:14px;padding:12px 14px;font-size:13.5px;opacity:0;transform:translateY(8px);transition:opacity .3s,transform .3s;pointer-events:none;z-index:4}
+.toast.show{opacity:1;transform:none}
+.toast b{color:#C8B8E0}
+.ey{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--lilac);font-weight:700;margin-bottom:8px}
+.hero-scan{margin:18px 0 6px;border-radius:22px;overflow:hidden;position:relative;background:#000;aspect-ratio:9/12}
+.hero-scan img{width:100%;height:100%;object-fit:cover;object-position:center 30%;display:block}
+.scanline{position:absolute;left:8%;right:8%;height:2px;background:#fff;box-shadow:0 0 12px #fff;top:20%;animation:scan 2.4s ease-in-out infinite}
+@keyframes scan{0%{top:22%}50%{top:70%}100%{top:22%}}
+.brk{position:absolute;width:26px;height:26px;border:3px solid #fff;border-radius:6px}
+.brk.tl{left:8%;top:18%;border-right:0;border-bottom:0}.brk.tr{right:8%;top:18%;border-left:0;border-bottom:0}
+.brk.bl{left:8%;bottom:26%;border-right:0;border-top:0}.brk.br{right:8%;bottom:26%;border-left:0;border-top:0}
+.pop{position:absolute;left:12px;right:12px;bottom:12px;background:#fff;border-radius:14px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center;animation:pop 4.8s ease-in-out infinite}
+@keyframes pop{0%,45%{opacity:0;transform:translateY(10px)}55%,95%{opacity:1;transform:none}100%{opacity:0}}
+.pop b{font-size:13px;color:var(--red)}.pop span{font-size:11px;color:var(--muted);display:block}
+.pop i{font-style:normal;font-size:11px;font-weight:700;background:var(--coral-wash);color:var(--red);padding:3px 8px;border-radius:999px}
+.meta{display:flex;gap:14px;font-size:12px;color:var(--muted);margin-top:10px}
+.meta span::before{content:"✓ ";color:var(--green)}
+.demo{border-radius:22px;overflow:hidden;position:relative;background:#000;aspect-ratio:9/13;margin-top:14px}
+.demo img{width:100%;height:100%;object-fit:cover;object-position:center 30%;display:block;transition:filter .4s}
+.demo .scanline{display:none}
+.demo.scanning .scanline{display:block;animation:scan 1s ease-in-out 2}
+.demo.done img{filter:brightness(.45)}
+.demo .result{position:absolute;left:10px;right:10px;bottom:10px;background:#fff;border-radius:16px;padding:12px;transform:translateY(120%);transition:transform .45s cubic-bezier(.2,.8,.2,1)}
+.demo.done .result{transform:none}
+.result .badge{font-size:9.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;background:var(--lilac-wash);color:var(--lilac);padding:3px 8px;border-radius:999px;float:right}
+.result b{display:block;font-size:14px;line-height:1.2}
+.result small{color:var(--muted);font-size:11.5px}
+.result .v{margin-top:8px;background:var(--coral-wash);color:var(--red);border-radius:10px;padding:8px 10px;font-size:13px;font-weight:700}
+.result .v span{display:block;font-weight:400;font-size:11.5px}
+.result .ax{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:8px;font-size:11px}
+.result .ax div{background:var(--paper);border-radius:8px;padding:5px 8px;display:flex;justify-content:space-between}
+.ok{color:var(--green);font-weight:700}.no{color:var(--red);font-weight:700}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0 4px}
+.chip{background:var(--card);border:1px solid var(--rule);border-radius:999px;padding:5px 10px;font-size:12px;font-weight:600}
+.chip small{font-weight:400;color:var(--muted);margin-right:3px}
+.field{border:1.5px solid var(--rule);background:var(--card);border-radius:14px;padding:13px 14px;font:inherit;font-size:15px;width:100%;margin-top:14px;color:var(--ink)}
+.field::placeholder{color:var(--muted)}
+.fine{font-size:11.5px;color:var(--muted);margin-top:8px}
+.reveal{display:grid;gap:10px;margin-top:20px}
+.reveal div{display:flex;gap:10px;align-items:center;font-size:14px;color:var(--muted)}
+.reveal div i{width:18px;height:18px;border-radius:50%;border:2px solid var(--lilac-soft);flex:none;display:grid;place-items:center;font-size:10px;font-style:normal}
+.reveal div.done{color:var(--ink)}
+.reveal div.done i{background:var(--green);border-color:var(--green);color:#fff}
+.guess{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:16px}
+.guess .opt{text-align:center}
+.answer{background:var(--card);border:1px solid var(--rule);border-radius:16px;padding:14px;margin-top:14px;display:none}
+.answer.show{display:block;animation:in .35s ease}
+.answer b{font-family:var(--f-display);font-weight:500;font-size:22px;display:block;line-height:1.15}
+.answer p{font-size:13.5px}
+
+/* Notizen rechts */
+.notes{font-size:15px}
+.notes h1{font-size:30px;margin-bottom:6px}
+.notes .lede{color:var(--ink-2);max-width:60ch}
+.tabs{display:flex;flex-wrap:wrap;gap:6px;margin:18px 0 14px}
+.tabs button{font:inherit;font-size:12.5px;font-weight:600;border:1.5px solid var(--rule);background:#fff;border-radius:999px;padding:6px 11px;cursor:pointer;color:var(--ink-2)}
+.tabs button.on{border-color:var(--lilac);background:var(--lilac);color:#fff}
+.note{display:none;background:#fff;border:1px solid var(--rule);border-radius:18px;padding:18px 20px}
+.note.on{display:block}
+.note h2{font-size:22px;margin-bottom:6px}
+.note .src{font-size:12px;color:var(--lilac);font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px}
+.note p{font-size:14.5px;max-width:62ch}
+.note ul{margin:8px 0 0;padding-left:18px;font-size:14px;color:var(--ink-2)}
+.note li{margin:4px 0}
+.note .why{margin-top:10px;background:var(--lilac-wash);border-radius:12px;padding:10px 12px;font-size:13.5px}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<div class="stage">
+<div>
+<div class="phone">
+  <div class="bar"><span>11:48</span><span>●●●● ᯤ ▮</span></div>
+  <div class="toast" id="toast"></div>
+
+  <!-- 0 · Landing -->
+  <div class="screen on" data-s="0">
+    <div class="ey">Haartest + Produkt-Scanner</div>
+    <h1>Finde raus, welche Produkte zu deinem Haar passen.</h1>
+    <p>10 Fragen zu deinem Haar. Danach zeigt dir der Scanner, ob die Produkte in deinem Bad und im Regal zu dir passen.</p>
+    <div class="hero-scan">
+      <img src="scanner-open.png" alt="Scanner im Drogerie-Regal">
+      <div class="brk tl"></div><div class="brk tr"></div><div class="brk bl"></div><div class="brk br"></div>
+      <div class="scanline"></div>
+      <div class="pop"><div><b>Passt nicht zu trockener Kopfhaut</b><span>1 von 2 Kriterien</span></div><i>Beispiel</i></div>
+    </div>
+    <div class="meta"><span>10 Fragen</span><span>2 Minuten</span><span>Kostenlos</span></div>
+    <button class="cta" onclick="go(1)">Haartest starten</button>
+  </div>
+
+  <!-- 1 · Frage 2 Haardicke mit Achsen-Fortschritt -->
+  <div class="screen" data-s="1">
+    <div class="progress"><small>2/10</small><div class="track"><i style="--p:20%"></i></div></div>
+    <div class="axes" id="axes">
+      <div><b>Dicke</b>Achse 1</div><div><b>Gewicht</b>Achse 2</div><div><b>Repair</b>Achse 3</div><div><b>Kopfhaut</b>Achse 4</div>
+    </div>
+    <div class="hint"><span>💡</span><span><b>Der Scanner braucht vier Angaben.</b> Diese Frage liefert die erste.</span></div>
+    <h2>Wie dick fühlt sich ein einzelnes Haar bei dir an?</h2>
+    <p>Vergleiche ein einzelnes Haar mit einem Nähfaden.</p>
+    <div class="opts">
+      <button class="opt" onclick="pick(this,1)"><b>Fein</b><span>Kaum spürbar, dünner als ein Nähfaden</span></button>
+      <button class="opt" onclick="pick(this,1)"><b>Mittel</b><span>Spürbar, ähnlich wie ein Nähfaden</span></button>
+      <button class="opt" onclick="pick(this,1)"><b>Dick</b><span>Deutlich spürbar, dicker als ein Nähfaden</span></button>
+    </div>
+  </div>
+
+  <!-- 2 · Frage 6 Zugtest -->
+  <div class="screen" data-s="2">
+    <div class="progress"><small>6/10</small><div class="track"><i style="--p:60%"></i></div></div>
+    <div class="axes"><div class="done"><b>Dicke</b>✓</div><div class="done"><b>Gewicht</b>✓</div><div><b>Repair</b>Achse 3</div><div><b>Kopfhaut</b>Achse 4</div></div>
+    <h2>Wie elastisch ist dein Haar?</h2>
+    <p>Klemm ein nasses Haar zwischen zwei Finger und zieh sanft.</p>
+    <div class="opts">
+      <button class="opt" onclick="pick(this,2)"><b>Dehnt sich und geht zurück</b><span>Federt in den Ursprungszustand</span></button>
+      <button class="opt" onclick="pick(this,2)"><b>Dehnt sich, bleibt ausgeleiert</b><span>Kommt nicht mehr zurück</span></button>
+      <button class="opt" onclick="pick(this,2)"><b>Reißt sofort</b><span>Bricht bei leichtem Zug</span></button>
+    </div>
+  </div>
+
+  <!-- 3 · Probescan -->
+  <div class="screen" data-s="3">
+    <div class="progress"><small>Zwischenstopp</small><div class="track"><i style="--p:65%"></i></div></div>
+    <div class="ey">Probier den Scanner</div>
+    <h2>So prüft der Scanner gleich deine Produkte.</h2>
+    <p>Tipp auf Scannen. Das hier ist ein Beispiel für eine trockene Kopfhaut.</p>
+    <div class="demo" id="demo">
+      <img src="scanner-open.png" alt="Scanner: Flasche im Rahmen">
+      <div class="brk tl"></div><div class="brk tr"></div><div class="brk bl"></div><div class="brk br"></div>
+      <div class="scanline"></div>
+      <div class="result">
+        <span class="badge">Beispiel</span>
+        <b>Balea Ultimate Volume Shampoo</b><small>Balea · Shampoo</small>
+        <div class="v">Passt nicht zu trockener Kopfhaut<span>1 von 2 Kriterien erfüllt</span></div>
+        <div class="ax"><div>Kopfhaut-Typ <span class="no">✕ fettig</span></div><div>Volumen-Ziel <span class="ok">✓</span></div></div>
+      </div>
+    </div>
+    <button class="cta lilac" id="scanBtn" onclick="demoScan()">Beispiel scannen</button>
+    <button class="cta" id="scanNext" onclick="go(4)" hidden>Weiter, noch 4 Fragen</button>
+  </div>
+
+  <!-- 4 · Schätzfrage -->
+  <div class="screen" data-s="4">
+    <div class="progress"><small>9/10</small><div class="track"><i style="--p:90%"></i></div></div>
+    <div class="axes"><div class="done"><b>Dicke</b>✓</div><div class="done"><b>Gewicht</b>✓</div><div class="done"><b>Repair</b>✓</div><div class="done"><b>Kopfhaut</b>✓</div></div>
+    <h2>Wie viele Haarprodukte stehen gerade bei dir im Bad?</h2>
+    <p>Shampoo, Spülung, Maske, Öl, Spray. Alles zählt.</p>
+    <div class="guess">
+      <button class="opt" onclick="guess(this,'1 bis 2')"><b>1 bis 2</b></button>
+      <button class="opt" onclick="guess(this,'3 bis 5')"><b>3 bis 5</b></button>
+      <button class="opt" onclick="guess(this,'mehr als 5')"><b>mehr als 5</b></button>
+    </div>
+    <div class="answer" id="answer">
+      <b id="answerHead">Von 3 bis 5 passen im Schnitt zwei.</b>
+      <p>Bei feinem, welligem Haar sind die meisten Produkte im Regal für mittleres Haar gebaut. Welche bei dir passen, zeigt dir der Scanner gleich.</p>
+    </div>
+    <button class="cta" id="guessNext" onclick="go(5)" hidden>Letzte Frage</button>
+  </div>
+
+  <!-- 5 · E-Mail als Scanner-Zugang -->
+  <div class="screen" data-s="5">
+    <div class="ey">Dein Haarprofil ist fertig</div>
+    <h2>Wohin dürfen wir deinen Scanner-Zugang schicken?</h2>
+    <div class="chips">
+      <span class="chip"><small>Struktur</small>wellig</span><span class="chip"><small>Dicke</small>fein</span><span class="chip"><small>Zugtest</small>gedehnt</span><span class="chip"><small>Kopfhaut</small>trocken</span><span class="chip"><small>Im Bad</small><span id="chipCount">3 bis 5</span></span>
+    </div>
+    <input class="field" type="email" placeholder="name@beispiel.de" aria-label="E-Mail">
+    <div class="fine">Dein Profil bleibt gespeichert, damit der Scanner jedes Produkt gegen genau dieses Haar prüft. Kein Spam.</div>
+    <button class="cta" onclick="go(6)">Scanner-Zugang schicken</button>
+  </div>
+
+  <!-- 6 · Micro-Commitment -->
+  <div class="screen" data-s="6" style="justify-content:center;text-align:center">
+    <h2>Jonas, willst du wissen, welche deiner Produkte zu diesem Haar passen?</h2>
+    <button class="cta" style="margin-top:22px" onclick="go(7)">Ja, zeig mir den Scanner</button>
+    <button class="cta ghost" onclick="go(7)">Erst mein Profil ansehen</button>
+  </div>
+
+  <!-- 7 · Reveal -->
+  <div class="screen" data-s="7">
+    <div class="ey">Einen Moment</div>
+    <h2>Wir stellen den Scanner auf dein Haar ein.</h2>
+    <div class="reveal" id="reveal">
+      <div><i>1</i>Haarprofil gespeichert: wellig, fein, gedehnter Zugtest</div>
+      <div><i>2</i>Vier Achsen eingestellt: Dicke, Gewicht, Repair, Kopfhaut</div>
+      <div><i>3</i>1.000 Produkte aus dm, Rossmann und Salon geladen</div>
+      <div><i>4</i>Scanner bereit</div>
+    </div>
+    <a class="cta" id="revealBtn" href="scanner-offer-page.html" hidden style="text-decoration:none">Zum Scanner</a>
+  </div>
+</div>
+<p style="text-align:center;font-size:12px;color:var(--muted);margin-top:12px">Klickbar. Nur die Screens, die sich ändern. Die restlichen Fragen bleiben wie heute.</p>
+</div>
+
+<div class="notes">
+  <div class="ey">Prototyp · 12.09.2026</div>
+  <h1>Der Scanner im Quiz</h1>
+  <p class="lede">Acht Screens, die den Scanner ins Quiz holen, ohne ein echtes Produkt zu bewerten. Jeder Screen hat ein Vorbild aus einer App, die genau damit skaliert hat. Links durchklicken, rechts steht, warum.</p>
+  <div class="tabs" id="tabs">
+    <button class="on" onclick="go(0)">0 Landing</button><button onclick="go(1)">1 Achsen</button><button onclick="go(2)">2 Fortschritt</button><button onclick="go(3)">3 Probescan</button><button onclick="go(4)">4 Schätzfrage</button><button onclick="go(5)">5 E-Mail</button><button onclick="go(6)">6 Commitment</button><button onclick="go(7)">7 Reveal</button>
+  </div>
+
+  <div class="note on" data-n="0">
+    <div class="src">Vorbild: Cal AI, Screen 1</div>
+    <h2>Der Scan läuft, bevor die erste Frage kommt</h2>
+    <p>Cal AI zeigt auf dem allerersten Screen den Food-Scan als Loop, vor jeder Frage, vor jeder Berechtigung. Das nimmt „ich versteh nicht, was das ist“ als Absprunggrund weg. Bei uns: der echte Scanner-Screen mit Scan-Linie und einem Beispiel-Ergebnis, das alle fünf Sekunden aufploppt.</p>
+    <ul><li>Headline trägt das Ad-Versprechen („Mach den Produktcheck“) weiter, nicht „Versteh dein Haar“.</li><li>Ergebnis-Chip ist als Beispiel markiert. Kein Preis, kein Kaufen-Button.</li><li>Später: 6-Sekunden-Video statt CSS-Animation, aus dem Media Package.</li></ul>
+    <div class="why">Frage 1 ist heute der größte Absprung (31 %). Wer vorher gesehen hat, wofür die Fragen sind, beantwortet sie eher.</div>
+  </div>
+  <div class="note" data-n="1">
+    <div class="src">Vorbild: Noom, jede Eingabe gibt etwas zurück</div>
+    <h2>Vier Achsen füllen sich sichtbar</h2>
+    <p>Noom lässt bei jeder Antwort etwas auf dem Screen passieren: das Zieldatum rückt näher, ein Balken füllt sich. Bei uns sind das die vier Achsen der Auswertung. Frage 2 (Dicke) füllt Achse 1, Frage 5 (Oberfläche) Achse 2, Frage 6 (Zugtest) Achse 3, Frage 8 (Kopfhaut) Achse 4.</p>
+    <ul><li>Die Leiste steht nur über den vier Fragen, die eine Achse liefern. Sonst wird sie Deko.</li><li>Nach der Antwort ein kurzer Toast: „Achse 1 von 4 erfasst: Geeignete Haardicke.“</li><li>Die Namen sind exakt die aus der Auswertung. Wer sie hier gesehen hat, liest das Ergebnis später ohne Erklärung.</li></ul>
+    <div class="why">Die Frage wird vom Datenpunkt zum Bauteil des Scanners. Das ist der Unterschied zwischen „Formular ausfüllen“ und „Werkzeug einstellen“.</div>
+  </div>
+  <div class="note" data-n="2">
+    <div class="src">Vorbild: Noom, Fortschritt statt Spinner</div>
+    <h2>Zwei von vier, und die Frage erklärt sich selbst</h2>
+    <p>Kein neuer Mechanismus, nur der Beweis, dass die Leiste lebt. Zwei Achsen sind grün, der Zugtest liefert die dritte. Der Zugtest ist die Frage mit dem größten Erklärungsbedarf, deshalb steht hier der Nutzen daneben statt einer Info-Box.</p>
+    <div class="why">Die Motivationszeilen „Super, noch 9 Fragen“ fallen weg. Fortschritt in Achsen ist konkreter als Fortschritt in Fragen.</div>
+  </div>
+  <div class="note" data-n="3">
+    <div class="src">Vorbild: PictureThis, der Demo-Scan vor der Kamera-Berechtigung</div>
+    <h2>Der Probescan: einmal selbst tippen</h2>
+    <p>PictureThis (8 Mio. $ im Monat) lässt vor der Kamera-Berechtigung einen Scan mit einem vorgeladenen Pflanzenbild ablaufen: Scan-Animation, Treffer, Pflegekarte, alles wie echt. Erst danach kommt die echte Kamera. Bei uns ist das der Zwischenstopp nach Frage 6: ein vorgeladenes Produkt, die Person tippt „Beispiel scannen“, die Linie läuft, das Ergebnis schiebt sich hoch.</p>
+    <ul><li>Ehrlich, weil es als Beispiel markiert ist und ein festes Profil nennt („für eine trockene Kopfhaut“). Das Produkt im Bild ist das Produkt im Ergebnis, das Balea-Shampoo aus dem Regal-Foto. Es behauptet nichts über das Haar der Person.</li><li>Das Ergebnis ist exakt der Screen aus dem Media Package. Was hier gelernt wird, sieht sie auf der Scanner-Seite und in der App wieder.</li><li>Kein Produkt der Person abfragen. Der Probescan ersetzt genau das.</li><li>Später, wenn die Engine offline für die häufigsten 20 Profile rechnen kann: „Wähle ein Produkt, das du kennst“ aus sechs Bestsellern, Ergebnis gegen das eigene Profil. Erst dann.</li></ul>
+    <div class="why">Der eine Tipp ist ein Micro-Commitment mit sofortiger Belohnung. Aus „Scanner“ wird eine Handlung, die man schon einmal gemacht hat.</div>
+  </div>
+  <div class="note" data-n="4">
+    <div class="src">Vorbild: Oeni „Rate den Wert“, Umax „Wette“</div>
+    <h2>Schätzfrage mit Verlust-Rahmen</h2>
+    <p>Oenis meistskalierte Ads sind Wetten: rate den Wert, dann kommt der Scan. Die Schätzfrage macht dasselbe ohne Produktname. Ein Tipp, dann die Antwort: „Von 3 bis 5 passen im Schnitt zwei.“ Das ist der Satz, der den Scanner nötig macht, und er baut auf einer Zahl, die die Person selbst gegeben hat.</p>
+    <ul><li>Antwort speichert sich als Attribut (Customer.io: <code>products_at_home</code>) und wird auf der Scanner-Seite und in Strang A wiederverwendet.</li><li>Die „im Schnitt zwei“ müssen belegbar sein. Wenn die Zahl fehlt: „die meisten sind für mittleres Haar gebaut“ ohne Zahl.</li></ul>
+    <div class="why">Verlust schlägt Gewinn: Oeni verkauft „200 Euro verloren“, nicht „besser genießen“. Bei uns: „drei Flaschen, die nicht zu dir passen“.</div>
+  </div>
+  <div class="note" data-n="5">
+    <div class="src">Vorbild: Cal AI, Plan-Vorschau vor dem Login</div>
+    <h2>Die E-Mail ist der Schlüssel, nicht das Formular</h2>
+    <p>Cal AI zeigt die Plan-Vorschau vor der Anmeldung, damit der Account etwas sichert, das man schon gesehen hat. Bei uns: das fertige Profil als Chips über dem Feld, darunter der Grund für die E-Mail: „damit der Scanner jedes Produkt gegen genau dieses Haar prüft“.</p>
+    <ul><li>Headline „Dein Haarprofil ist fertig“ statt „Dein Pflegeplan ist bereit“.</li><li>Button „Scanner-Zugang schicken“ statt „Weiter“.</li><li>Einwilligungs-Screen danach bleibt unverändert, Koppelungsverbot.</li></ul>
+    <div class="why">Heute liegt Abschluss zu E-Mail bei 90 %. Das Ziel hier ist nicht die Rate, sondern dass die Person mit dem Wort Scanner in die Seite geht.</div>
+  </div>
+  <div class="note" data-n="6">
+    <div class="src">Vorbild: bestehendes Micro-Commitment, neu gerichtet</div>
+    <h2>Das letzte Ja ist das Ja zum Scanner</h2>
+    <p>Der Screen existiert schon („bereit für den nächsten Schritt mit deinem Haar?“). Nur die Frage dreht sich: welche deiner Produkte passen zu diesem Haar. Der Nebenweg „Erst mein Profil ansehen“ führt auf dieselbe Seite, nur zum Profil-Block gescrollt.</p>
+    <div class="why">Konsistenz: Wer hier Ja sagt, hat sich öffentlich für den Scanner entschieden. Auf der Seite ist das Freischalten dann die Fortsetzung, nicht eine neue Entscheidung.</div>
+  </div>
+  <div class="note" data-n="7">
+    <div class="src">Vorbild: Noom, Ladebildschirm als Lehrmoment</div>
+    <h2>Der Reveal stellt den Scanner ein</h2>
+    <p>Noom nutzt Ladebildschirme, um zu erklären, was gerade gebaut wird. Bei uns: vier Zeilen, die nacheinander grün werden. Die letzte heißt „Scanner bereit“, und der Button heißt „Zum Scanner“. Heute sagt der Reveal „startest du mit deinem persönlichen Haarplan“.</p>
+    <ul><li>Dauer 4 bis 6 Sekunden, nicht 20. Der Reveal ist eine Brücke, kein Theater.</li><li>Zeile 1 nennt das echte Profil, Zeile 3 die echte Produktzahl.</li></ul>
+    <div class="why">Der letzte Screen vor der Seite bestimmt, was die Person auf der Seite sucht. Sie soll den Scanner suchen und ihn oben finden.</div>
+  </div>
+</div>
+</div>
+
+<script>
+var cur=0;
+function go(n){
+  document.querySelectorAll('.screen').forEach(function(s){s.classList.toggle('on',+s.dataset.s===n)});
+  document.querySelectorAll('.note').forEach(function(s){s.classList.toggle('on',+s.dataset.n===n)});
+  document.querySelectorAll('#tabs button').forEach(function(b,i){b.classList.toggle('on',i===n)});
+  cur=n; if(n===7) runReveal();
+}
+function toast(html){var t=document.getElementById('toast');t.innerHTML=html;t.classList.add('show');setTimeout(function(){t.classList.remove('show')},1800)}
+function pick(el,screen){
+  el.parentNode.querySelectorAll('.opt').forEach(function(o){o.classList.remove('sel')});el.classList.add('sel');
+  if(screen===1){document.querySelectorAll('#axes div')[0].classList.add('done');document.querySelectorAll('#axes div')[0].innerHTML='<b>Dicke</b>✓';toast('<b>Achse 1 von 4 erfasst:</b> Geeignete Haardicke');setTimeout(function(){go(2)},1500)}
+  if(screen===2){var ax=document.querySelectorAll('[data-s="2"] .axes div')[2];ax.classList.add('done');ax.innerHTML='<b>Repair</b>✓';toast('<b>Achse 3 von 4 erfasst:</b> Repair-Unterstützung');setTimeout(function(){go(3)},1500)}
+}
+function demoScan(){
+  var d=document.getElementById('demo'),b=document.getElementById('scanBtn');
+  d.classList.add('scanning');b.disabled=true;b.textContent='Scanne …';
+  setTimeout(function(){d.classList.remove('scanning');d.classList.add('done');b.hidden=true;document.getElementById('scanNext').hidden=false;document.getElementById('scanNext').style.marginTop='12px'},2100);
+}
+function guess(el,label){
+  el.parentNode.querySelectorAll('.opt').forEach(function(o){o.classList.remove('sel')});el.classList.add('sel');
+  var head={'1 bis 2':'Von 2 Produkten passt oft nur eins.','3 bis 5':'Von 3 bis 5 passen im Schnitt zwei.','mehr als 5':'Von mehr als 5 passen im Schnitt zwei.'}[label];
+  document.getElementById('answerHead').textContent=head;document.getElementById('answer').classList.add('show');
+  document.getElementById('guessNext').hidden=false;document.getElementById('guessNext').style.marginTop='12px';
+  document.getElementById('chipCount').textContent=label;
+}
+function runReveal(){
+  var rows=document.querySelectorAll('#reveal div'),btn=document.getElementById('revealBtn');
+  rows.forEach(function(r){r.classList.remove('done')});btn.hidden=true;
+  rows.forEach(function(r,i){setTimeout(function(){r.classList.add('done');r.querySelector('i').textContent='✓';if(i===rows.length-1){btn.hidden=false;btn.style.marginTop='18px'}},900*(i+1))});
+}
+</script>

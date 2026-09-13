@@ -1,0 +1,283 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Chaarlie Scanner-Seite</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap">
+<style>
+:root{
+  --paper:#FDFBF9;--card:#FFFFFF;--ink:#2A1845;--ink-2:#5B4A78;--muted:#8A7BA3;--rule:#E7E1D8;
+  --lilac:#6B50A0;--lilac-soft:#C8B8E0;--lilac-wash:#EEE9F6;--coral:#D4616A;--coral-wash:#FBE9EA;
+  --green:#3C7D5A;--green-wash:#E6F2EA;--red:#9B2C3B;
+  --f-display:"Fraunces",Georgia,serif;--f-body:"Plus Jakarta Sans",-apple-system,"Segoe UI",sans-serif;
+}
+*{box-sizing:border-box}
+html{color-scheme:light}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--f-body);font-size:16px;line-height:1.55;-webkit-font-smoothing:antialiased}
+.wrap{max-width:480px;margin:0 auto;padding:0 0 110px}
+header{display:flex;justify-content:space-between;align-items:center;padding:14px 20px;border-bottom:1px solid var(--rule);position:sticky;top:0;background:rgba(253,251,249,.94);backdrop-filter:blur(8px);z-index:5}
+.brand{font-family:var(--f-display);font-size:24px;color:var(--ink);text-decoration:none;display:flex;align-items:center}
+.brand i{display:inline-block;width:3px;height:16px;background:var(--lilac-soft);box-shadow:6px 0 0 var(--lilac-soft),12px 0 0 var(--lilac-soft);margin-right:22px}
+header a.top{font-size:13px;font-weight:600;color:#fff;background:var(--lilac);padding:8px 14px;border-radius:999px;text-decoration:none}
+section{padding:28px 20px 0}
+.ey{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--lilac);font-weight:700}
+h1,h2,h3{font-family:var(--f-display);font-weight:500;line-height:1.1;text-wrap:balance;margin:8px 0 0;letter-spacing:-.01em}
+h1{font-size:34px}
+h2{font-size:26px}
+h3{font-size:19px;font-family:var(--f-body);font-weight:700}
+p{margin:10px 0 0;color:var(--ink-2);font-size:15px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.chip{background:var(--card);border:1px solid var(--rule);border-radius:999px;padding:6px 12px;font-size:13px;font-weight:600}
+.chip small{font-weight:400;color:var(--muted);margin-right:4px}
+.card{background:var(--card);border:1px solid var(--rule);border-radius:18px;padding:16px;margin-top:14px}
+.dim{padding:12px 0;border-bottom:1px solid var(--rule)}
+.dim:last-child{border-bottom:0;padding-bottom:4px}
+.dim h3{margin:0;font-size:16px}
+.dim .bars{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px}
+.dim .bars div{background:var(--paper);border:1px solid var(--rule);border-radius:10px;padding:8px 10px}
+.dim .bars small{display:block;font-size:11px;color:var(--muted);margin-bottom:5px}
+.dim .bars i{display:block;height:6px;border-radius:99px;background:var(--lilac-wash);position:relative;overflow:hidden}
+.dim .bars i::after{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--w);background:var(--lilac)}
+.dim .bars .ziel i::after{background:var(--green);width:var(--w)}
+.dim p{font-size:13.5px;margin-top:8px}
+.good{background:var(--green-wash);border-radius:14px;padding:14px 16px;margin-top:14px}
+.good b{display:block;color:var(--green);font-size:11px;letter-spacing:.12em;text-transform:uppercase}
+.good span{display:block;font-family:var(--f-display);font-size:20px;color:var(--ink);margin-top:2px}
+.good p{margin-top:4px}
+.bridge{background:var(--ink);color:#fff;border-radius:20px;padding:22px 20px;margin-top:0}
+.bridge .ey{color:var(--lilac-soft)}
+.bridge h2{color:#fff}
+.bridge p{color:rgba(255,255,255,.82)}
+.shots{display:grid;grid-template-columns:1fr;gap:14px;margin-top:14px}
+.shot{background:var(--card);border:1px solid var(--rule);border-radius:20px;padding:14px;position:relative}
+.shot .lbl{display:flex;justify-content:space-between;align-items:center}
+.shot .lbl b{font-size:15px}
+.shot .badge{font-size:10.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;background:var(--lilac-wash);color:var(--lilac);padding:4px 9px;border-radius:999px}
+.shot .frame{margin:12px auto 0;width:min(100%,300px);border-radius:26px;border:6px solid #1B1426;overflow:hidden;background:#000;box-shadow:0 18px 40px rgba(42,24,69,.18)}
+.shot .frame img{display:block;width:100%}
+.steps{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:12px}
+.steps div{background:var(--paper);border:1px solid var(--rule);border-radius:12px;padding:10px 8px;text-align:center;font-size:12px;line-height:1.35;color:var(--ink-2)}
+.steps b{display:block;font-family:var(--f-display);font-size:20px;color:var(--ink);font-weight:500;margin-bottom:2px}
+.axes4{margin-top:12px;display:grid;gap:6px}
+.axes4 div{display:flex;justify-content:space-between;font-size:13px;padding:8px 10px;background:var(--paper);border-radius:10px}
+.axes4 b{font-weight:600}.ok{color:var(--green);font-weight:600}.no{color:var(--red);font-weight:600}
+.trial{background:var(--card);border:2px solid var(--lilac);border-radius:20px;padding:20px 18px 16px;margin-top:16px;position:relative}
+.trial .tag{position:absolute;top:-12px;left:16px;background:var(--lilac);color:#fff;font-size:10.5px;letter-spacing:.12em;font-weight:700;padding:4px 10px;border-radius:999px;text-transform:uppercase}
+.trial h2{font-size:28px}
+.tl{display:grid;grid-template-columns:24px 1fr;gap:0 12px;margin-top:14px}
+.tl .dot{width:14px;height:14px;border-radius:50%;background:var(--lilac-soft);margin:5px 0 0 5px;position:relative}
+.tl .dot.on{background:var(--lilac)}
+.tl .dot::after{content:"";position:absolute;left:6px;top:14px;width:2px;height:40px;background:var(--rule)}
+.tl .dot.last::after{display:none}
+.tl b{font-size:15px;display:block}.tl span{font-size:13px;color:var(--muted);display:block;padding-bottom:14px}
+.plans{display:grid;gap:10px;margin-top:12px}
+.plan{border:1.5px solid var(--rule);border-radius:14px;padding:12px 14px;display:flex;align-items:center;gap:12px;cursor:pointer;background:var(--card);position:relative}
+.plan.sel{border-color:var(--lilac);background:#F6F3FB}
+.plan input{position:absolute;opacity:0;width:0;height:0}
+.radio{width:18px;height:18px;border-radius:50%;border:1.5px solid var(--lilac-soft);flex:none}
+.plan.sel .radio{border:6px solid var(--lilac)}
+.plan .t{flex:1}.plan .t b{display:block;font-size:15px}.plan .t span{font-size:12.5px;color:var(--muted)}
+.plan .pr{text-align:right;font-size:14px;font-weight:600;font-variant-numeric:tabular-nums}.plan .pr small{display:block;font-weight:600;color:var(--green);font-size:11px}
+.plan .best{position:absolute;top:-9px;right:12px;font-size:9.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;background:var(--coral);color:#fff;padding:2px 8px;border-radius:999px}
+.cta{display:block;width:100%;background:var(--coral);color:#fff;text-align:center;font:inherit;font-weight:700;font-size:16px;padding:16px;border-radius:14px;margin-top:14px;border:0;cursor:pointer}
+.legal{font-size:11.5px;color:var(--muted);text-align:center;margin-top:10px;line-height:1.45}
+.trust{display:flex;justify-content:center;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--ink-2);margin-top:10px}
+.trust span::before{content:"✓ ";color:var(--green)}
+.inc .row{display:flex;justify-content:space-between;align-items:center;padding:11px 0;border-bottom:1px solid var(--rule);font-size:15px}
+.inc .row:last-child{border-bottom:0}
+.free{font-size:11px;font-weight:700;color:var(--green);background:var(--green-wash);padding:3px 9px;border-radius:999px}
+.tcard{background:var(--card);border:1px solid var(--rule);border-radius:18px;padding:16px;margin-top:12px}
+.tcard .stars{color:var(--coral);font-size:14px;letter-spacing:1px}
+.tcard b{display:block;font-size:15px;margin-top:6px}
+.tcard p{font-size:14.5px;margin-top:6px}
+.vid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
+.vid figure{margin:0;aspect-ratio:9/14;border-radius:16px;background:linear-gradient(180deg,#C9BADD 0%,#7B6499 55%,#2A1845 100%);position:relative;overflow:hidden}
+.vid figure::before{content:"▶";position:absolute;left:50%;top:42%;transform:translate(-50%,-50%);width:44px;height:44px;border-radius:50%;background:rgba(255,255,255,.92);color:var(--ink);display:grid;place-items:center;font-size:14px;padding-left:3px}
+.vid figcaption{position:absolute;left:12px;right:12px;bottom:12px;color:#fff;font-size:13px;line-height:1.35;font-weight:600}
+.vid figcaption small{display:block;font-weight:400;opacity:.8;margin-top:3px}
+.note{font-size:11px;color:var(--muted);margin-top:8px}
+.quote{font-size:14px;color:var(--ink-2);border-left:2px solid var(--lilac-soft);padding-left:12px;margin-top:14px}
+.quote b{display:block;color:var(--ink);font-size:13px}
+details{border-top:1px solid var(--rule);padding:12px 0}
+details:last-of-type{border-bottom:1px solid var(--rule)}
+summary{cursor:pointer;font-size:15px;font-weight:600;list-style:none;display:flex;justify-content:space-between;align-items:center}
+summary::after{content:"⌄";color:var(--muted);font-size:18px;transition:transform .2s}
+details[open] summary::after{transform:rotate(180deg)}
+details p{font-size:14px;margin-top:8px}
+footer{padding:26px 20px 10px;font-size:12px;color:var(--muted);text-align:center;line-height:1.7}
+footer a{color:var(--muted);margin:0 6px}
+.sticky{position:fixed;left:0;right:0;bottom:0;background:rgba(253,251,249,.94);backdrop-filter:blur(8px);border-top:1px solid var(--rule);padding:10px 20px 16px;z-index:6;transform:translateY(110%);transition:transform .25s}
+.sticky.show{transform:none}
+.sticky .inner{max-width:480px;margin:0 auto;display:flex;align-items:center;gap:12px}
+.sticky .cta{margin:0;flex:1;padding:14px}
+.sticky small{font-size:11px;color:var(--muted);line-height:1.3;width:100px}
+.wa{position:fixed;right:18px;bottom:24px;width:54px;height:54px;border-radius:50%;background:#25D366;display:grid;place-items:center;box-shadow:0 10px 24px rgba(0,0,0,.2);z-index:7;text-decoration:none;transition:bottom .25s}
+body.has-sticky .wa{bottom:92px}
+.wa svg{width:30px;height:30px;fill:#fff}
+.wa-hint{position:fixed;right:80px;bottom:36px;background:#fff;border:1px solid var(--rule);border-radius:12px;padding:8px 12px;font-size:12.5px;color:var(--ink);box-shadow:0 8px 20px rgba(42,24,69,.14);z-index:7;opacity:0;transform:translateY(6px);transition:opacity .3s,transform .3s,bottom .25s;pointer-events:none;white-space:nowrap}
+body.has-sticky .wa-hint{bottom:104px}
+.wa-hint.show{opacity:1;transform:none}
+@media (min-width:560px){.wa{right:calc(50% - 240px + 18px)}.wa-hint{right:calc(50% - 240px + 80px)}}
+button:focus-visible,a:focus-visible,.plan:focus-within{outline:2px solid var(--coral);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="wrap">
+<header>
+  <a class="brand" href="#"><i></i>chaarlie</a>
+  <a class="top" href="#trial">Scanner freischalten</a>
+</header>
+
+<!-- 1 · Ergebnis: was für Haare hat die Person -->
+<section>
+  <div class="ey">Dein Ergebnis, Jonas</div>
+  <h1>Welliges, feines Haar mit mittlerer Dichte.</h1>
+  <p>Aus deinen 10 Antworten haben wir 13 Angaben ausgewertet. So ordnen wir dein Haar ein.</p>
+  <div class="chips">
+    <span class="chip"><small>Struktur</small>wellig</span>
+    <span class="chip"><small>Dicke</small>fein</span>
+    <span class="chip"><small>Dichte</small>mittel</span>
+    <span class="chip"><small>Länge</small>lang</span>
+    <span class="chip"><small>Oberfläche</small>leicht uneben</span>
+    <span class="chip"><small>Zugtest</small>bleibt gedehnt</span>
+    <span class="chip"><small>Behandlung</small>gefärbt</span>
+    <span class="chip"><small>Kopfhaut</small>eher trocken</span>
+  </div>
+</section>
+
+<section style="padding-top:18px">
+  <div class="ey">Deine Ausgangslage</div>
+  <div class="card">
+    <div class="dim">
+      <h3>Oberfläche &amp; Frizz</h3>
+      <div class="bars"><div><small>Heute</small><i style="--w:38%"></i></div><div class="ziel"><small>Dein Ziel</small><i style="--w:85%"></i></div></div>
+      <p>Frizz oder abstehende Haare sind nicht automatisch Haarbruch: Einzelne Fasern liegen weniger gleichmäßig in der Gesamtform.</p>
+    </div>
+    <div class="dim">
+      <h3>Feuchtigkeit &amp; Geschmeidigkeit</h3>
+      <div class="bars"><div><small>Heute</small><i style="--w:32%"></i></div><div class="ziel"><small>Dein Ziel</small><i style="--w:85%"></i></div></div>
+      <p>Trockene oder strohige Längen fühlen sich weniger geschmeidig an. Dein Zugtest sagt: die Längen brauchen Repair, nicht nur Feuchtigkeit.</p>
+    </div>
+    <div class="dim">
+      <h3>Kopfhaut-Balance</h3>
+      <div class="bars"><div><small>Heute</small><i style="--w:45%"></i></div><div class="ziel"><small>Dein Ziel</small><i style="--w:85%"></i></div></div>
+      <p>Trockene Kopfhaut passt besser zu milder Reinigung als zu zusätzlicher Entfettung.</p>
+    </div>
+  </div>
+  <div class="good"><b>Das Gute</b><span>Hier können wir gezielt ansetzen.</span><p>Feines, gefärbtes Haar mit gedehntem Zugtest braucht leichte Pflege mit hoher Repair-Unterstützung. Die meisten Produkte im Regal sind für mittleres Haar gebaut.</p></div>
+</section>
+
+<!-- 2 · Brücke zum Scanner -->
+<section>
+  <div class="bridge">
+    <div class="ey">Das ist für deine Produkte</div>
+    <h2>Der Scanner zeigt dir, ob das Produkt bei dir zu Hause oder in der Drogerie zu deinen Haaren passt.</h2>
+    <p>Handy dranhalten, eine Sekunde: passt oder passt nicht. Mit dem Grund. Und zu jedem, was nicht passt, drei Alternativen.</p>
+  </div>
+</section>
+
+<!-- 3 · So sieht der Scanner aus -->
+<section style="padding-top:14px">
+  <div class="shots">
+    <div class="shot">
+      <div class="lbl"><b>So sieht der Scanner aus</b><span class="badge">Schritt 1</span></div>
+      <div class="frame"><img src="scanner-open.png" alt="Scanner-Ansicht der Chaarlie-App: Kamera im Drogerie-Regal, Rahmen um eine Flasche"></div>
+      <div class="steps"><div><b>1</b>Handy an das Produkt halten</div><div><b>1 s</b>bis das Ergebnis da ist</div><div><b>3</b>Alternativen, wenn es nicht passt</div></div>
+    </div>
+
+    <!-- 4 · So sieht die Auswertung aus -->
+    <div class="shot">
+      <div class="lbl"><b>So sieht die Auswertung aus</b><span class="badge">Beispiel</span></div>
+      <div class="frame"><img src="scan-pantene.png" alt="Beispiel-Auswertung: Pantene Conditioner, Passt nicht zu deinem Haar, 2 von 4 Zielbereichen, vier Achsen mit Häkchen und Kreuzen"></div>
+      <div class="axes4">
+        <div><b>Pflegegewicht</b><span class="ok">✓ passt</span></div>
+        <div><b>Pflegerichtung</b><span class="ok">✓ passt</span></div>
+        <div><b>Repair-Unterstützung</b><span class="no">✕ zu niedrig</span></div>
+        <div><b>Geeignete Haardicke</b><span class="no">✕ für mittleres Haar</span></div>
+      </div>
+      <p style="font-size:13px">Beispiel für ein feines, geschädigtes Haarprofil. Kein schlechtes Produkt, nur für ein anderes Haar gebaut. Genau das siehst du bei jedem Produkt in deinem Bad.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 5 · Freischalten -->
+<section id="trial">
+  <div class="ey">Jetzt freischalten</div>
+  <h2>Schalte den Scanner frei. 7 Tage kostenlos.</h2>
+  <div class="trial">
+    <span class="tag">Einmalig für dein Profil</span>
+    <p style="margin-top:4px">Unbegrenzte Scans, die drei Alternativen zu jedem Produkt, dein Haarplan und der Haarcoach. Wir erinnern dich an Tag 5, bevor etwas berechnet wird.</p>
+    <div class="tl">
+      <div class="dot on"></div><div><b>Heute: Scanner offen</b><span>Alles freigeschaltet, sofort nach dem Klick.</span></div>
+      <div class="dot"></div><div><b>Tag 5: Erinnerung</b><span>Per E-Mail, mit einem Klick kündbar.</span></div>
+      <div class="dot last"></div><div><b>Tag 7: Abo beginnt</b><span id="tlPrice">69,99 € im Jahr, jederzeit kündbar.</span></div>
+    </div>
+    <div class="plans" role="radiogroup" aria-label="Tarif">
+      <label class="plan sel" data-plan="year"><span class="best">Beliebteste Wahl</span><input type="radio" name="plan" value="year" checked><span class="radio"></span><span class="t"><b>Jahr</b><span>7 Tage kostenlos, dann 69,99 €/Jahr</span></span><span class="pr">5,83 €/Mo<small>Testphase inklusive</small></span></label>
+      <label class="plan" data-plan="month"><input type="radio" name="plan" value="month"><span class="radio"></span><span class="t"><b>Monat</b><span>7 Tage kostenlos, dann 9,99 €/Monat</span></span><span class="pr">9,99 €/Mo<small>Testphase inklusive</small></span></label>
+    </div>
+    <button class="cta" id="cta" type="button">Scanner freischalten, 7 Tage kostenlos</button>
+    <div class="legal" id="legal">Danach 69,99 € im Jahr. Kündbar bis Tag 7 ohne Kosten. Es gilt das 14-tägige Widerrufsrecht.</div>
+    <div class="trust"><span>PayPal · Apple Pay · Karte</span><span>Mit Friseurmeistern entwickelt</span></div>
+  </div>
+</section>
+
+<!-- 6 · Was drin ist -->
+<section class="inc">
+  <div class="ey">Was in der Testphase drin ist</div>
+  <div class="card" style="padding:4px 16px">
+    <div class="row"><b>Unbegrenzte Scans</b><span class="free">frei</span></div>
+    <div class="row"><b>Drei Alternativen je Produkt</b><span class="free">frei</span></div>
+    <div class="row"><b>Dein Haarplan mit Routine</b><span class="free">frei</span></div>
+    <div class="row"><b>Haarcoach, rund um die Uhr</b><span class="free">frei</span></div>
+    <div class="row"><b>Dein Produktregal, gespeichert</b><span class="free">frei</span></div>
+  </div>
+</section>
+
+<!-- 7 · Stimmen -->
+<section>
+  <div class="ey">Stimmen aus der Beta</div>
+  <h2>Das sagen Kundinnen über Chaarlie.</h2>
+  <div class="tcard"><div class="stars">★★★★★</div><b>Kim · Endlich verstehe ich meine Haare</b><p>„Der Fragebogen ist echt gut und leicht verständlich. Auch die Produktempfehlung fand ich gut.“</p></div>
+  <div class="tcard"><div class="stars">★★★★★</div><b>Kerstin · Echte Antworten bekommen</b><p>„Ich finde die Interaktion sehr gut: meine Fragen stellen zu können und dann die benötigten Antworten zu bekommen.“</p></div>
+  <div class="tcard"><div class="stars">★★★★★</div><b>Sarah · Nie wieder googeln vorm Regal</b><p>„Bei den Produkten stehen Preis, Anwendung und der Grund dabei, warum sie empfohlen werden.“</p></div>
+  <div class="quote"><b>Über 4.000 Frauen haben uns geantwortet</b>82 % wollen verstehen, was ihr Haar wirklich braucht. 63 % suchen Klarheit, welche Produkte wirklich passen.</div>
+</section>
+
+<!-- 8 · FAQ -->
+<section>
+  <div class="ey">Häufige Fragen</div>
+  <div style="margin-top:10px">
+    <details><summary>Was passiert nach den 7 Tagen?</summary><p>Wenn du nicht kündigst, beginnt dein gewählter Tarif. Wir schicken dir an Tag 5 eine E-Mail, damit du das in Ruhe entscheiden kannst.</p></details>
+    <details><summary>Wie kündige ich die Testphase?</summary><p>In deinem Profil unter Abo mit einem Tipp, ohne Rückfrage. Bis Tag 7 kostet dich das nichts.</p></details>
+    <details><summary>Funktioniert das mit Drogerie-Produkten?</summary><p>Ja. Über 1.000 Produkte von dm, Rossmann, Müller und aus dem Salon sind in der Datenbank, jede Woche kommen neue dazu.</p></details>
+    <details><summary>Was, wenn ein Produkt nicht erkannt wird?</summary><p>Dann fotografierst du die Rückseite, wir nehmen es innerhalb von 48 Stunden auf und du bekommst das Ergebnis per E-Mail.</p></details>
+    <details><summary>Warum reicht nicht einfach ein neues Shampoo?</summary><p>Weil dein Haar drei Dinge braucht, die zusammenpassen: Reinigung, Pflege, Schutz. Der Scanner prüft jedes Produkt gegen dein Profil, nicht gegen die Verpackung.</p></details>
+  </div>
+</section>
+
+<footer>
+  <a href="#">Impressum</a>·<a href="#">Datenschutz</a>·<a href="#">AGB</a>·<a href="#">Widerruf</a>·<a href="#">Kontakt</a>
+  <div style="margin-top:6px">Chaarlie · Haarmony LLC</div>
+</footer>
+</div>
+
+<a class="wa" href="https://wa.me/4900000000000?text=Hallo%2C%20ich%20bin%20Jonas%2C%20welliges%20feines%20Haar%2C%20und%20hab%20eine%20Frage%20zum%20Scanner." aria-label="Frage per WhatsApp stellen" target="_blank" rel="noopener"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5.1-1.3A10 10 0 1 0 12 2zm0 18.2a8.2 8.2 0 0 1-4.2-1.2l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1 1 12 20.2zm4.5-6.1c-.2-.1-1.5-.7-1.7-.8s-.4-.1-.6.1-.6.8-.8 1-.3.2-.5.1a6.7 6.7 0 0 1-3.3-2.9c-.3-.4.3-.4.7-1.3.1-.2 0-.3 0-.5l-.8-1.8c-.2-.5-.4-.4-.6-.4h-.5a1 1 0 0 0-.7.3 3 3 0 0 0-.9 2.2 5.2 5.2 0 0 0 1.1 2.8 12 12 0 0 0 4.6 4c1.7.7 2.1.6 2.8.5a2.4 2.4 0 0 0 1.6-1.1 2 2 0 0 0 .1-1.1c0-.1-.2-.2-.5-.3z"/></svg></a>
+<div class="wa-hint" id="wahint">Frage zum Scanner? Schreib uns.</div>
+
+<div class="sticky" id="sticky"><div class="inner"><small id="stickyNote">7 Tage kostenlos, dann 69,99 €/Jahr</small><button class="cta" type="button" onclick="document.getElementById('trial').scrollIntoView({behavior:'smooth'})">Scanner freischalten</button></div></div>
+
+<script>
+(function(){
+  var plans=document.querySelectorAll('.plan'),legal=document.getElementById('legal'),note=document.getElementById('stickyNote'),tl=document.getElementById('tlPrice');
+  plans.forEach(function(p){p.addEventListener('click',function(){
+    plans.forEach(function(q){q.classList.remove('sel')});p.classList.add('sel');
+    if(p.dataset.plan==='year'){legal.textContent='Danach 69,99 € im Jahr. Kündbar bis Tag 7 ohne Kosten. Es gilt das 14-tägige Widerrufsrecht.';note.textContent='7 Tage kostenlos, dann 69,99 €/Jahr';tl.textContent='69,99 € im Jahr, jederzeit kündbar.';}
+    else{legal.textContent='Danach 9,99 € im Monat. Kündbar bis Tag 7 ohne Kosten. Es gilt das 14-tägige Widerrufsrecht.';note.textContent='7 Tage kostenlos, dann 9,99 €/Monat';tl.textContent='9,99 € im Monat, monatlich kündbar.';}
+  })});
+  var trial=document.getElementById('trial'),sticky=document.getElementById('sticky');
+  if('IntersectionObserver' in window){new IntersectionObserver(function(e){var on=!e[0].isIntersecting&&e[0].boundingClientRect.top<0;sticky.classList.toggle('show',on);document.body.classList.toggle('has-sticky',on)},{threshold:0}).observe(trial);}
+  var hint=document.getElementById('wahint');setTimeout(function(){hint.classList.add('show')},8000);
+  window.addEventListener('scroll',function(){hint.classList.remove('show')},{passive:true,once:true});
+})();
+</script>
