@@ -81,7 +81,7 @@ const REVIEW_MODEL: ScannerOfferModel = {
 }
 
 const WHATSAPP_LAB_HREF =
-  "https://wa.me/4900000000000?text=" +
+  "https://wa.me/4915223198774?text=" +
   encodeURIComponent("Hallo, ich bin Jonas, welliges feines Haar, und hab eine Frage zum Scanner.")
 
 export default function ScannerOfferLab() {

@@ -60,7 +60,7 @@ Dazu: Sticky-CTA auf Mobile (erscheint, sobald die Trial-Box nach oben aus dem B
 Der Scanner existiert in `src/components/scan/` (`scan-result-card.tsx`, `scan-dimension-bar.tsx`, `scan-masked-alternatives.tsx`). Sobald ein Beispiel-Ergebnis als Fixture vorliegt, kann Block 4 („So sieht die Auswertung aus“) die echte `ScanResultCard` rendern statt des Screenshots. Dann bleibt die Seite automatisch mit der App synchron.
 
 ### Konfiguration
-- WhatsApp-Nummer und Vorlagentext als Env (`NEXT_PUBLIC_WHATSAPP_NUMBER`), vorausgefüllt mit Vorname und Profil.
+- WhatsApp-Nummer: +49 1522 3198774 (Chaarlie-Konto), als `NEXT_PUBLIC_WHATSAPP_NUMBER=4915223198774` konfigurierbar; Vorlagentext vorausgefüllt mit Vorname und Profil. Das Lab nutzt die Nummer bereits.
 - `data-offer-variant="scanner-offer-v1"` steht am Root, `data-offer-section` an jeder Sektion für PostHog-Heatmaps und Tests.
 
 ## Entscheidungen, die schon gefallen sind
