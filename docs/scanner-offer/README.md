@@ -18,7 +18,7 @@ Die Komponente ist bewusst frei von App-Logik, damit sie sich an der Stelle der 
 1. **Haarprofil.** Vorname, ein Satz („Welliges, feines Haar mit mittlerer Dichte.“), Chips aus den Quiz-Antworten, die drei Ausgangslage-Dimensionen aus dem bestehenden `publicOfferModel`, „Das Gute“.
 2. **Brücke.** „Der Scanner zeigt dir, ob deine Produkte zu Hause oder in der Drogerie zu deinen Haaren passen. Handy dranhalten, eine Sekunde: passt oder passt nicht. Mit dem Grund. Und zu jedem, was nicht passt, drei Alternativen.“
 3. **So sieht der Scanner aus.** Regal-Foto mit Hand, Handy und offenem Scanner (Composite aus dem Ad-Set, Screen ist der echte App-Screen).
-4. **So sieht die Auswertung aus.** Echter Ergebnis-Screen als Geräte-Bild in voller Auflösung (Statusleiste komplett, unten ausgeblendet), als Beispiel markiert, mit fester Profilangabe. Es wird **kein Produkt der Person bewertet**, das Quiz fragt keins ab.
+4. **So sieht die Auswertung aus.** Ergebnis-Sheet aus dem echten App-Screen in voller Auflösung, ohne Statusleiste und Geräterahmen, unten ausgeblendet, als Beispiel markiert, mit fester Profilangabe. Es wird **kein Produkt der Person bewertet**, das Quiz fragt keins ab.
 5. **Freischalten.** Trial-Box mit Zeitleiste (Heute, Tag 5, Tag 7), zwei Tarife, beide mit 7 Tagen kostenlos, Jahr vorausgewählt, Button „Scanner freischalten, 7 Tage kostenlos“, Folgepreis im Kleingedruckten.
 6. **Was in der Testphase drin ist.** Fünf Zeilen, alle „frei“.
 7. **Stimmen aus der Beta.** Die drei bestehenden Textzitate. Videos (Steffi, Lucy) kommen später von Jonas.

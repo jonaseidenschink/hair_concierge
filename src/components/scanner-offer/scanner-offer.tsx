@@ -174,10 +174,10 @@ function DeviceShot({ alt, src }: { alt: string; src: string }) {
       <Image
         alt={alt}
         className="block h-auto w-full drop-shadow-[0_18px_30px_rgba(42,24,69,0.22)]"
-        height={1784}
+        height={1554}
         sizes="(max-width: 480px) 80vw, 320px"
         src={src}
-        width={1274}
+        width={1206}
       />
     </div>
   )
