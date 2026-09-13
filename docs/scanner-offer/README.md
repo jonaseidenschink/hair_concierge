@@ -8,7 +8,7 @@ Stand: 13.09.2026. Entscheidung von Jonas: Der Quiz-Funnel führt nach dem Quiz 
 |---|---|
 | `src/components/scanner-offer/scanner-offer.tsx` | Die Seite als Client-Komponente mit typisiertem Model. Kein Checkout, kein Tracking, keine Datenbank. |
 | `src/app/labs/scanner-offer/page.tsx` | Lab-Route `/labs/scanner-offer` mit Beispieldaten, gleiche Sperre wie `/labs/offer-page`. |
-| `public/images/funnels/scanner-offer/` | Zwei echte App-Screens aus dem Media Package (Scanner offen, Beispiel-Auswertung), ohne Preis und Kaufen-Button. |
+| `public/images/funnels/scanner-offer/` | Regal-Foto mit dem offenen Scanner (Composite aus dem Ad-Set) und die Beispiel-Auswertung als Geräte-Screen in voller Auflösung, ohne Preis und Kaufen-Button. |
 | `docs/scanner-offer/mockups/` | Die abgenommenen HTML-Mockups: `scanner-offer-page.html` (die Seite, klickbar) und `quiz-scanner-flow.html` (die geänderten Quiz-Screens mit Probescan). Direkt im Browser öffnen. |
 
 Die Komponente ist bewusst frei von App-Logik, damit sie sich an der Stelle der heutigen `PersonalPlanOffer` einhängen lässt, sobald die Punkte unten stehen.
@@ -17,13 +17,13 @@ Die Komponente ist bewusst frei von App-Logik, damit sie sich an der Stelle der 
 
 1. **Haarprofil.** Vorname, ein Satz („Welliges, feines Haar mit mittlerer Dichte.“), Chips aus den Quiz-Antworten, die drei Ausgangslage-Dimensionen aus dem bestehenden `publicOfferModel`, „Das Gute“.
 2. **Brücke.** „Der Scanner zeigt dir, ob das Produkt bei dir zu Hause oder in der Drogerie zu deinen Haaren passt. Handy dranhalten, eine Sekunde: passt oder passt nicht. Mit dem Grund. Und zu jedem, was nicht passt, drei Alternativen.“
-3. **So sieht der Scanner aus.** Echter Scanner-Screen im Handyrahmen.
-4. **So sieht die Auswertung aus.** Echter Ergebnis-Screen, als Beispiel markiert, mit fester Profilangabe. Es wird **kein Produkt der Person bewertet**, das Quiz fragt keins ab.
+3. **So sieht der Scanner aus.** Regal-Foto mit Hand, Handy und offenem Scanner (Composite aus dem Ad-Set, Screen ist der echte App-Screen).
+4. **So sieht die Auswertung aus.** Echter Ergebnis-Screen als Geräte-Bild in voller Auflösung (Statusleiste komplett, unten ausgeblendet), als Beispiel markiert, mit fester Profilangabe. Es wird **kein Produkt der Person bewertet**, das Quiz fragt keins ab.
 5. **Freischalten.** Trial-Box mit Zeitleiste (Heute, Tag 5, Tag 7), zwei Tarife, beide mit 7 Tagen kostenlos, Jahr vorausgewählt, Button „Scanner freischalten, 7 Tage kostenlos“, Folgepreis im Kleingedruckten.
 6. **Was in der Testphase drin ist.** Fünf Zeilen, alle „frei“.
 7. **Stimmen aus der Beta.** Die drei bestehenden Textzitate. Videos (Steffi, Lucy) kommen später von Jonas.
 8. **FAQ.** Fünf Fragen, auf Trial und Scanner gedreht.
-9. **Footer** mit `offerFooterLinks` und Cookie-Button.
+9. **Footer** über `SiteFooter` (Impressum, Datenschutz, AGB, Widerruf, Kontakt).
 
 Dazu: Sticky-CTA auf Mobile (erscheint, sobald die Trial-Box nach oben aus dem Bild ist) und WhatsApp-Button unten rechts.
 

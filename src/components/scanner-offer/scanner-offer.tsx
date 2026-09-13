@@ -168,10 +168,32 @@ function Eyebrow({ children }: { children: ReactNode }) {
   )
 }
 
-function PhoneFrame({ alt, src }: { alt: string; src: string }) {
+function DeviceShot({ alt, src }: { alt: string; src: string }) {
   return (
-    <div className="mx-auto mt-3 w-full max-w-[300px] overflow-hidden rounded-[26px] border-[6px] border-[#1b1426] bg-black shadow-[0_18px_40px_rgba(42,24,69,0.18)]">
-      <Image alt={alt} className="block h-auto w-full" height={1000} src={src} width={446} />
+    <div className="mx-auto mt-3 w-full max-w-[320px]">
+      <Image
+        alt={alt}
+        className="block h-auto w-full drop-shadow-[0_18px_30px_rgba(42,24,69,0.22)]"
+        height={1784}
+        sizes="(max-width: 480px) 80vw, 320px"
+        src={src}
+        width={1274}
+      />
+    </div>
+  )
+}
+
+function ShelfPhoto({ alt, src }: { alt: string; src: string }) {
+  return (
+    <div className="mt-3 overflow-hidden rounded-2xl">
+      <Image
+        alt={alt}
+        className="block h-auto w-full"
+        height={790}
+        sizes="(max-width: 480px) 90vw, 440px"
+        src={src}
+        width={1254}
+      />
     </div>
   )
 }
@@ -343,9 +365,9 @@ export function ScannerOffer({
                 Schritt 1
               </span>
             </div>
-            <PhoneFrame
-              alt="Scanner-Ansicht der Chaarlie-App: Kamera im Drogerie-Regal, Rahmen um eine Flasche"
-              src="/images/funnels/scanner-offer/scanner-open.webp"
+            <ShelfPhoto
+              alt="Hand hält das Handy im Drogerie-Regal, der Chaarlie-Scanner erkennt ein Balea-Shampoo"
+              src="/images/funnels/scanner-offer/photo-scanner-shelf.webp"
             />
             <div className="mt-3 grid grid-cols-3 gap-2">
               {[
@@ -374,9 +396,9 @@ export function ScannerOffer({
                 Beispiel
               </span>
             </div>
-            <PhoneFrame
+            <DeviceShot
               alt="Beispiel-Auswertung: Conditioner, Passt nicht zu deinem Haar, 2 von 4 Zielbereichen, vier Achsen mit Häkchen und Kreuzen"
-              src="/images/funnels/scanner-offer/scan-example.webp"
+              src="/images/funnels/scanner-offer/device-scan-example.webp"
             />
             <ul className="mt-3 grid gap-1.5">
               {exampleAxes.map(([axis, verdict, tone]) => (

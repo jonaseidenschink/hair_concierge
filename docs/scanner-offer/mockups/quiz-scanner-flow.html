@@ -47,21 +47,19 @@ p{margin:8px 0 0;color:var(--ink-2);font-size:14.5px}
 .toast.show{opacity:1;transform:none}
 .toast b{color:#C8B8E0}
 .ey{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--lilac);font-weight:700;margin-bottom:8px}
-.hero-scan{margin:18px 0 6px;border-radius:22px;overflow:hidden;position:relative;background:#000;aspect-ratio:9/12}
-.hero-scan img{width:100%;height:100%;object-fit:cover;object-position:center 30%;display:block}
-.scanline{position:absolute;left:8%;right:8%;height:2px;background:#fff;box-shadow:0 0 12px #fff;top:20%;animation:scan 2.4s ease-in-out infinite}
-@keyframes scan{0%{top:22%}50%{top:70%}100%{top:22%}}
-.brk{position:absolute;width:26px;height:26px;border:3px solid #fff;border-radius:6px}
-.brk.tl{left:8%;top:18%;border-right:0;border-bottom:0}.brk.tr{right:8%;top:18%;border-left:0;border-bottom:0}
-.brk.bl{left:8%;bottom:26%;border-right:0;border-top:0}.brk.br{right:8%;bottom:26%;border-left:0;border-top:0}
+.hero-scan{margin:18px 0 6px;border-radius:18px;overflow:hidden;position:relative;background:#000;aspect-ratio:1254/790}
+.hero-scan img{width:100%;height:100%;object-fit:cover;display:block}
+.scanline{position:absolute;left:41%;right:37%;height:2px;background:#fff;box-shadow:0 0 12px #fff;top:22%;animation:scan 2.4s ease-in-out infinite}
+@keyframes scan{0%{top:22%}50%{top:62%}100%{top:22%}}
+.brk{display:none}
 .pop{position:absolute;left:12px;right:12px;bottom:12px;background:#fff;border-radius:14px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center;animation:pop 4.8s ease-in-out infinite}
 @keyframes pop{0%,45%{opacity:0;transform:translateY(10px)}55%,95%{opacity:1;transform:none}100%{opacity:0}}
 .pop b{font-size:13px;color:var(--red)}.pop span{font-size:11px;color:var(--muted);display:block}
 .pop i{font-style:normal;font-size:11px;font-weight:700;background:var(--coral-wash);color:var(--red);padding:3px 8px;border-radius:999px}
 .meta{display:flex;gap:14px;font-size:12px;color:var(--muted);margin-top:10px}
 .meta span::before{content:"✓ ";color:var(--green)}
-.demo{border-radius:22px;overflow:hidden;position:relative;background:#000;aspect-ratio:9/13;margin-top:14px}
-.demo img{width:100%;height:100%;object-fit:cover;object-position:center 30%;display:block;transition:filter .4s}
+.demo{border-radius:18px;overflow:hidden;position:relative;background:#000;aspect-ratio:1254/790;margin-top:14px}
+.demo img{width:100%;height:100%;object-fit:cover;display:block;transition:filter .4s}
 .demo .scanline{display:none}
 .demo.scanning .scanline{display:block;animation:scan 1s ease-in-out 2}
 .demo.done img{filter:brightness(.45)}
@@ -123,7 +121,7 @@ p{margin:8px 0 0;color:var(--ink-2);font-size:14.5px}
     <h1>Finde raus, welche Produkte zu deinem Haar passen.</h1>
     <p>10 Fragen zu deinem Haar. Danach zeigt dir der Scanner, ob die Produkte in deinem Bad und im Regal zu dir passen.</p>
     <div class="hero-scan">
-      <img src="scanner-open.png" alt="Scanner im Drogerie-Regal">
+      <img src="photo-scanner-shelf.webp" width="1254" height="790" alt="Hand hält das Handy im Drogerie-Regal, der Scanner erkennt ein Balea-Shampoo">
       <div class="brk tl"></div><div class="brk tr"></div><div class="brk bl"></div><div class="brk br"></div>
       <div class="scanline"></div>
       <div class="pop"><div><b>Passt nicht zu trockener Kopfhaut</b><span>1 von 2 Kriterien</span></div><i>Beispiel</i></div>
@@ -168,7 +166,7 @@ p{margin:8px 0 0;color:var(--ink-2);font-size:14.5px}
     <h2>So prüft der Scanner gleich deine Produkte.</h2>
     <p>Tipp auf Scannen. Das hier ist ein Beispiel für eine trockene Kopfhaut.</p>
     <div class="demo" id="demo">
-      <img src="scanner-open.png" alt="Scanner: Flasche im Rahmen">
+      <img src="photo-scanner-shelf.webp" width="1254" height="790" alt="Scanner im Regal: Balea-Shampoo im Rahmen">
       <div class="brk tl"></div><div class="brk tr"></div><div class="brk bl"></div><div class="brk br"></div>
       <div class="scanline"></div>
       <div class="result">

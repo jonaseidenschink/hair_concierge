@@ -53,8 +53,10 @@ p{margin:10px 0 0;color:var(--ink-2);font-size:15px}
 .shot .lbl{display:flex;justify-content:space-between;align-items:center}
 .shot .lbl b{font-size:15px}
 .shot .badge{font-size:10.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;background:var(--lilac-wash);color:var(--lilac);padding:4px 9px;border-radius:999px}
-.shot .frame{margin:12px auto 0;width:min(100%,300px);border-radius:26px;border:6px solid #1B1426;overflow:hidden;background:#000;box-shadow:0 18px 40px rgba(42,24,69,.18)}
-.shot .frame img{display:block;width:100%}
+.shot .frame{margin:12px auto 0;width:min(100%,320px)}
+.shot .frame img{display:block;width:100%;height:auto;filter:drop-shadow(0 18px 30px rgba(42,24,69,.22))}
+.shot .photo{margin:12px 0 0;border-radius:16px;overflow:hidden}
+.shot .photo img{display:block;width:100%;height:auto}
 .steps{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:12px}
 .steps div{background:var(--paper);border:1px solid var(--rule);border-radius:12px;padding:10px 8px;text-align:center;font-size:12px;line-height:1.35;color:var(--ink-2)}
 .steps b{display:block;font-family:var(--f-display);font-size:20px;color:var(--ink);font-weight:500;margin-bottom:2px}
@@ -181,14 +183,14 @@ button:focus-visible,a:focus-visible,.plan:focus-within{outline:2px solid var(--
   <div class="shots">
     <div class="shot">
       <div class="lbl"><b>So sieht der Scanner aus</b><span class="badge">Schritt 1</span></div>
-      <div class="frame"><img src="scanner-open.png" alt="Scanner-Ansicht der Chaarlie-App: Kamera im Drogerie-Regal, Rahmen um eine Flasche"></div>
+      <div class="photo"><img src="photo-scanner-shelf.webp" width="1254" height="790" alt="Hand hält das Handy im Drogerie-Regal, der Chaarlie-Scanner erkennt ein Balea-Shampoo"></div>
       <div class="steps"><div><b>1</b>Handy an das Produkt halten</div><div><b>1 s</b>bis das Ergebnis da ist</div><div><b>3</b>Alternativen, wenn es nicht passt</div></div>
     </div>
 
     <!-- 4 · So sieht die Auswertung aus -->
     <div class="shot">
       <div class="lbl"><b>So sieht die Auswertung aus</b><span class="badge">Beispiel</span></div>
-      <div class="frame"><img src="scan-pantene.png" alt="Beispiel-Auswertung: Pantene Conditioner, Passt nicht zu deinem Haar, 2 von 4 Zielbereichen, vier Achsen mit Häkchen und Kreuzen"></div>
+      <div class="frame"><img src="device-scan-example.webp" width="1274" height="2768" alt="Beispiel-Auswertung: Pantene Conditioner, Passt nicht zu deinem Haar, 2 von 4 Zielbereichen, vier Achsen mit Häkchen und Kreuzen"></div>
       <div class="axes4">
         <div><b>Pflegegewicht</b><span class="ok">✓ passt</span></div>
         <div><b>Pflegerichtung</b><span class="ok">✓ passt</span></div>
