@@ -424,6 +424,32 @@ export function ScannerOffer({
               anderes Haar gebaut. Genau das siehst du bei jedem Produkt in deinem Bad.
             </p>
           </div>
+
+          {/* 4b · Kundin zeigt den Scanner an eigenen Produkten */}
+          <div className="mt-3.5 rounded-[20px] border border-[rgba(var(--brand-plum-rgb),0.10)] bg-white p-3.5">
+            <div className="flex items-center justify-between">
+              <strong className="text-[15px]">Und so läuft das zu Hause</strong>
+              <span className="rounded-full bg-[var(--brand-plum-ice)] px-2.5 py-1 text-[10.5px] font-bold uppercase tracking-[0.1em] text-[var(--brand-plum)]">
+                Kundin
+              </span>
+            </div>
+            <figure className="mt-3">
+              {/* Untertitel-Spur folgt mit der finalen Fassung (Datei liegt noch nicht vor). */}
+              <video
+                className="block aspect-[9/16] w-full rounded-2xl bg-[#1b1426] object-cover"
+                controls
+                playsInline
+                poster="/images/funnels/scanner-offer/steffi-scanner-poster.jpg"
+                preload="metadata"
+              >
+                <source src="/videos/funnels/scanner-offer/steffi-scanner.mp4" type="video/mp4" />
+                Dein Browser kann dieses Video nicht abspielen.
+              </video>
+              <figcaption className="mt-2 text-center text-[12.5px] text-[rgba(var(--brand-plum-rgb),0.62)]">
+                Steffi · Chaarlie-Kundin, testet den Scanner an ihren eigenen Produkten
+              </figcaption>
+            </figure>
+          </div>
         </section>
 
         {/* 5 · Freischalten */}

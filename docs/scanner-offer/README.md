@@ -9,6 +9,7 @@ Stand: 13.09.2026. Entscheidung von Jonas: Der Quiz-Funnel führt nach dem Quiz 
 | `src/components/scanner-offer/scanner-offer.tsx` | Die Seite als Client-Komponente mit typisiertem Model. Kein Checkout, kein Tracking, keine Datenbank. |
 | `src/app/labs/scanner-offer/page.tsx` | Lab-Route `/labs/scanner-offer` mit Beispieldaten, gleiche Sperre wie `/labs/offer-page`. |
 | `public/images/funnels/scanner-offer/` | Regal-Foto mit dem offenen Scanner (Composite aus dem Ad-Set) und die Beispiel-Auswertung als Geräte-Screen in voller Auflösung, ohne Preis und Kaufen-Button. |
+| `public/videos/funnels/scanner-offer/steffi-scanner.mp4` | Kundinnen-Video (Steffi, 29 s, 720p, 5 MB). Preis-Button im App-Screen ist verdeckt, Denkpause herausgeschnitten. Für die Produktion über Wistia ausliefern wie das bestehende VSL; die Datei hier ist die Vorlage für den Upload. |
 | `docs/scanner-offer/mockups/` | Die abgenommenen HTML-Mockups: `scanner-offer-page.html` (die Seite, klickbar) und `quiz-scanner-flow.html` (die geänderten Quiz-Screens mit Probescan). Direkt im Browser öffnen. |
 
 Die Komponente ist bewusst frei von App-Logik, damit sie sich an der Stelle der heutigen `PersonalPlanOffer` einhängen lässt, sobald die Punkte unten stehen.
@@ -19,6 +20,7 @@ Die Komponente ist bewusst frei von App-Logik, damit sie sich an der Stelle der 
 2. **Brücke.** „Der Scanner zeigt dir, ob deine Produkte zu Hause oder in der Drogerie zu deinen Haaren passen. Handy dranhalten, eine Sekunde: passt oder passt nicht. Mit dem Grund. Und zu jedem, was nicht passt, drei Alternativen.“
 3. **So sieht der Scanner aus.** Regal-Foto mit Hand, Handy und offenem Scanner (Composite aus dem Ad-Set, Screen ist der echte App-Screen).
 4. **So sieht die Auswertung aus.** Ergebnis-Sheet aus dem echten App-Screen in voller Auflösung, ohne Statusleiste und Geräterahmen, unten ausgeblendet, als Beispiel markiert, mit fester Profilangabe. Es wird **kein Produkt der Person bewertet**, das Quiz fragt keins ab.
+4b. **Und so läuft das zu Hause.** Video von Steffi, die den Scanner an ihren eigenen Produkten testet. 29 Sekunden, Ton an per Klick, Poster-Bild vorab. Der Preis-Button im gefilmten App-Screen ist verdeckt (Markenregel: kein Preis im Bild).
 5. **Freischalten.** Trial-Box mit Zeitleiste (Heute, Tag 5, Tag 7), zwei Tarife, beide mit 7 Tagen kostenlos, Jahr vorausgewählt, Button „Scanner freischalten, 7 Tage kostenlos“, Folgepreis im Kleingedruckten.
 6. **Was in der Testphase drin ist.** Fünf Zeilen, alle „frei“.
 7. **Stimmen aus der Beta.** Die drei bestehenden Textzitate. Videos (Steffi, Lucy) kommen später von Jonas.
@@ -55,6 +57,11 @@ Dazu: Sticky-CTA auf Mobile (erscheint, sobald die Trial-Box nach oben aus dem B
 | `checkout_opened` mit `plan`, `price`, `trial: true` | Overlay offen |
 | `trial_started` | Stripe-Webhook |
 | `whatsapp_clicked` | Klick auf den WhatsApp-Button |
+
+### Video
+- Untertitel fehlen noch. Für Mobile ohne Ton eine `.vtt`-Spur ergänzen, sobald die finale Fassung steht.
+- Ein zweites Video (Lucy) ist angekündigt und kommt daneben.
+- Für die Produktion: Wistia oder Mux statt Datei im Repo, dann `trial_started`-Attribution und Abspielrate messbar (`testimonial_played`).
 
 ### Später: echte Scan-Komponenten statt Screenshots
 Der Scanner existiert in `src/components/scan/` (`scan-result-card.tsx`, `scan-dimension-bar.tsx`, `scan-masked-alternatives.tsx`). Sobald ein Beispiel-Ergebnis als Fixture vorliegt, kann Block 4 („So sieht die Auswertung aus“) die echte `ScanResultCard` rendern statt des Screenshots. Dann bleibt die Seite automatisch mit der App synchron.
